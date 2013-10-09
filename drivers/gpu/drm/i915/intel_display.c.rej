@@ -1,0 +1,196 @@
+--- drivers/gpu/drm/i915/intel_display.c
++++ drivers/gpu/drm/i915/intel_display.c
+@@ -42,6 +42,7 @@
+ bool intel_pipe_has_type (struct drm_crtc *crtc, int type);
+ static void intel_update_watermarks(struct drm_device *dev);
+ static void intel_increase_pllclock(struct drm_crtc *crtc, bool schedule);
++static void intel_crtc_update_cursor(struct drm_crtc *crtc);
+ 
+ typedef struct {
+     /* given values */
+@@ -1501,6 +1502,7 @@
+ 	dpa_ctl = I915_READ(DP_A);
+ 	dpa_ctl |= DP_PLL_ENABLE;
+ 	I915_WRITE(DP_A, dpa_ctl);
++	POSTING_READ(DP_A);
+ 	udelay(200);
+ }
+ 
+@@ -2374,11 +2379,19 @@
+ 				  struct drm_display_mode *adjusted_mode)
+ {
+ 	struct drm_device *dev = crtc->dev;
++
+ 	if (HAS_PCH_SPLIT(dev)) {
+ 		/* FDI link clock is fixed at 2.7G */
+ 		if (mode->clock * 3 > 27000 * 4)
+ 			return MODE_CLOCK_HIGH;
+ 	}
++
++	/* XXX some encoders set the crtcinfo, others don't.
++	 * Obviously we need some form of conflict resolution here...
++	 */
++	if (adjusted_mode->crtc_htotal == 0)
++		drm_mode_set_crtcinfo(adjusted_mode, 0);
++
+ 	return true;
+ }
+ 
+@@ -3204,8 +3217,7 @@
+ 		reg_value = I915_READ(WM1_LP_ILK);
+ 		reg_value &= ~(WM1_LP_LATENCY_MASK | WM1_LP_SR_MASK |
+ 			       WM1_LP_CURSOR_MASK);
+-		reg_value |= WM1_LP_SR_EN |
+-			     (ilk_sr_latency << WM1_LP_LATENCY_SHIFT) |
++		reg_value |= (ilk_sr_latency << WM1_LP_LATENCY_SHIFT) |
+ 			     (sr_wm << WM1_LP_SR_SHIFT) | cursor_wm;
+ 
+ 		I915_WRITE(WM1_LP_ILK, reg_value);
+@@ -4034,11 +4128,7 @@
+ 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
+ 	struct drm_gem_object *bo;
+ 	struct drm_i915_gem_object *obj_priv;
+-	int pipe = intel_crtc->pipe;
+-	uint32_t control = (pipe == 0) ? CURACNTR : CURBCNTR;
+-	uint32_t base = (pipe == 0) ? CURABASE : CURBBASE;
+-	uint32_t temp = I915_READ(control);
+-	size_t addr;
++	uint32_t addr;
+ 	int ret;
+ 
+ 	DRM_DEBUG_KMS("\n");
+@@ -4087,7 +4171,8 @@
+ 
+ 		addr = obj_priv->gtt_offset;
+ 	} else {
+-		ret = i915_gem_attach_phys_object(dev, bo, (pipe == 0) ? I915_GEM_PHYS_CURSOR_0 : I915_GEM_PHYS_CURSOR_1);
++		ret = i915_gem_attach_phys_object(dev, bo,
++						  (intel_crtc->pipe == 0) ? I915_GEM_PHYS_CURSOR_0 : I915_GEM_PHYS_CURSOR_1);
+ 		if (ret) {
+ 			DRM_ERROR("failed to attach phys object\n");
+ 			goto fail_locked;
+@@ -4112,6 +4183,10 @@
+ 
+ 	intel_crtc->cursor_addr = addr;
+ 	intel_crtc->cursor_bo = bo;
++	intel_crtc->cursor_width = width;
++	intel_crtc->cursor_height = height;
++
++	intel_crtc_update_cursor(crtc);
+ 
+ 	return 0;
+ fail_unpin:
+@@ -4125,34 +4200,12 @@
+ 
+ static int intel_crtc_cursor_move(struct drm_crtc *crtc, int x, int y)
+ {
+-	struct drm_device *dev = crtc->dev;
+-	struct drm_i915_private *dev_priv = dev->dev_private;
+ 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
+-	struct intel_framebuffer *intel_fb;
+-	int pipe = intel_crtc->pipe;
+-	uint32_t temp = 0;
+-	uint32_t adder;
+ 
+-	if (crtc->fb) {
+-		intel_fb = to_intel_framebuffer(crtc->fb);
+-		intel_mark_busy(dev, intel_fb->obj);
+-	}
++	intel_crtc->cursor_x = x;
++	intel_crtc->cursor_y = y;
+ 
+-	if (x < 0) {
+-		temp |= CURSOR_POS_SIGN << CURSOR_X_SHIFT;
+-		x = -x;
+-	}
+-	if (y < 0) {
+-		temp |= CURSOR_POS_SIGN << CURSOR_Y_SHIFT;
+-		y = -y;
+-	}
+-
+-	temp |= x << CURSOR_X_SHIFT;
+-	temp |= y << CURSOR_Y_SHIFT;
+-
+-	adder = intel_crtc->cursor_addr;
+-	I915_WRITE((pipe == 0) ? CURAPOS : CURBPOS, temp);
+-	I915_WRITE((pipe == 0) ? CURABASE : CURBBASE, adder);
++	intel_crtc_update_cursor(crtc);
+ 
+ 	return 0;
+ }
+@@ -4839,14 +4892,16 @@
+ 	work->pending_flip_obj = obj;
+ 
+ 	if (intel_crtc->plane)
+-		flip_mask = I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT;
++		flip_mask = MI_WAIT_FOR_PLANE_B_FLIP;
+ 	else
+-		flip_mask = I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT;
++		flip_mask = MI_WAIT_FOR_PLANE_A_FLIP;
+ 
+-	/* Wait for any previous flip to finish */
+-	if (IS_GEN3(dev))
+-		while (I915_READ(ISR) & flip_mask)
+-			;
++	if (IS_GEN3(dev) || IS_GEN2(dev)) {
++		BEGIN_LP_RING(2);
++		OUT_RING(MI_WAIT_FOR_EVENT | flip_mask);
++		OUT_RING(0);
++		ADVANCE_LP_RING();
++	}
+ 
+ 	/* Offset into the new buffer for cases of shared fbs between CRTCs */
+ 	offset = obj_priv->gtt_offset;
+@@ -4860,12 +4915,18 @@
+ 		OUT_RING(offset | obj_priv->tiling_mode);
+ 		pipesrc = I915_READ(pipesrc_reg); 
+ 		OUT_RING(pipesrc & 0x0fff0fff);
+-	} else {
++	} else if (IS_GEN3(dev)) {
+ 		OUT_RING(MI_DISPLAY_FLIP_I915 |
+ 			 MI_DISPLAY_FLIP_PLANE(intel_crtc->plane));
+ 		OUT_RING(fb->pitch);
+ 		OUT_RING(offset);
+ 		OUT_RING(MI_NOOP);
++	} else {
++		OUT_RING(MI_DISPLAY_FLIP |
++			 MI_DISPLAY_FLIP_PLANE(intel_crtc->plane));
++		OUT_RING(fb->pitch);
++		OUT_RING(offset);
++		OUT_RING(MI_NOOP);
+ 	}
+ 	ADVANCE_LP_RING();
+ 
+@@ -4929,7 +4990,7 @@
+ 	dev_priv->pipe_to_crtc_mapping[intel_crtc->pipe] = &intel_crtc->base;
+ 
+ 	intel_crtc->cursor_addr = 0;
+-	intel_crtc->dpms_mode = DRM_MODE_DPMS_OFF;
++	intel_crtc->dpms_mode = -1;
+ 	drm_crtc_helper_add(&intel_crtc->base, &intel_helper_funcs);
+ 
+ 	intel_crtc->busy = false;
+@@ -5420,6 +5481,13 @@
+ 		I915_WRITE(PCH_DSPCLK_GATE_D, dspclk_gate);
+ 
+ 		/*
++		 * On Ibex Peak and Cougar Point, we need to disable clock
++		 * gating for the panel power sequencer or it will fail to
++		 * start up when no ports are active.
++		 */
++		I915_WRITE(SOUTH_DSPCLK_GATE_D, PCH_DPLSUNIT_CLOCK_GATE_DISABLE);
++
++		/*
+ 		 * According to the spec the following bits should be set in
+ 		 * order to enable memory self-refresh
+ 		 * The bit 22/21 of 0x42004
+@@ -5436,6 +5504,9 @@
+ 			I915_WRITE(DISP_ARB_CTL,
+ 					(I915_READ(DISP_ARB_CTL) |
+ 						DISP_FBC_WM_DIS));
++		I915_WRITE(WM3_LP_ILK, 0);
++		I915_WRITE(WM2_LP_ILK, 0);
++		I915_WRITE(WM1_LP_ILK, 0);
+ 		}
+ 		return;
+ 	} else if (IS_G4X(dev)) {

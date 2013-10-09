@@ -1,0 +1,2 @@
+0x00000000	bcmsdh_remove	/home/mike/dev/android/s7/gingerbread/out/target/product/s7/obj/dhd-cdc-sdmmc-gpl-2.6.32.60-ideos/dhd	EXPORT_SYMBOL
+0x00000000	bcmsdh_probe	/home/mike/dev/android/s7/gingerbread/out/target/product/s7/obj/dhd-cdc-sdmmc-gpl-2.6.32.60-ideos/dhd	EXPORT_SYMBOL

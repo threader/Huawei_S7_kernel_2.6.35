@@ -1,0 +1,3 @@
+<6>[  122.912214] mmc0: msmsdcc_req_tout_timer_hdlr CMD25
+<3>[  122.917945] mmcblk0: error -110 sending read/write command, response 0x900, card status 0xe00
+<3>[  122.918382] mmcblk0: error -110 transferring data, sector 8393, nr 8, card status 0xc00

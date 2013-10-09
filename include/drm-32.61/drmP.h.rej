@@ -1,0 +1,85 @@
+--- include/drm/drmP.h
++++ include/drm/drmP.h
+@@ -886,11 +967,21 @@
+ 	 */
+ 	int (*gem_init_object) (struct drm_gem_object *obj);
+ 	void (*gem_free_object) (struct drm_gem_object *obj);
+-	void (*gem_free_object_unlocked) (struct drm_gem_object *obj);
+ 
+ 	/* vga arb irq handler */
+ 	void (*vgaarb_irq)(struct drm_device *dev, bool state);
+ 
++	/* dumb alloc support */
++	int (*dumb_create)(struct drm_file *file_priv,
++			   struct drm_device *dev,
++			   struct drm_mode_create_dumb *args);
++	int (*dumb_map_offset)(struct drm_file *file_priv,
++			       struct drm_device *dev, uint32_t handle,
++			       uint64_t *offset);
++	int (*dumb_destroy)(struct drm_file *file_priv,
++			    struct drm_device *dev,
++			    uint32_t handle);
++
+ 	/* Driver private ops for this object */
+ 	struct vm_operations_struct *gem_vm_ops;
+ 
+@@ -1244,10 +1337,8 @@
+ extern int drm_mmap(struct file *filp, struct vm_area_struct *vma);
+ extern int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma);
+ extern void drm_vm_open_locked(struct vm_area_struct *vma);
+-extern resource_size_t drm_core_get_map_ofs(struct drm_local_map * map);
+-extern resource_size_t drm_core_get_reg_ofs(struct drm_device *dev);
+-extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
+ extern void drm_vm_close_locked(struct vm_area_struct *vma);
++extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
+ 
+ 				/* Memory management support (drm_memory.h) */
+ #include "drm_memory.h"
+@@ -1527,16 +1616,17 @@
+ void drm_gem_destroy(struct drm_device *dev);
+ void drm_gem_object_release(struct drm_gem_object *obj);
+ void drm_gem_object_free(struct kref *kref);
+-void drm_gem_object_free_unlocked(struct kref *kref);
+ struct drm_gem_object *drm_gem_object_alloc(struct drm_device *dev,
+ 					    size_t size);
+ int drm_gem_object_init(struct drm_device *dev,
+ 			struct drm_gem_object *obj, size_t size);
+-void drm_gem_object_handle_free(struct kref *kref);
++void drm_gem_object_handle_free(struct drm_gem_object *obj);
+ void drm_gem_vm_open(struct vm_area_struct *vma);
+ void drm_gem_vm_close(struct vm_area_struct *vma);
+ int drm_gem_mmap(struct file *filp, struct vm_area_struct *vma);
+ 
++#include "drm_global.h"
++
+ static inline void
+ drm_gem_object_reference(struct drm_gem_object *obj)
+ {
+@@ -1553,19 +1643,24 @@
+ static inline void
+ drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
+ {
+-	if (obj != NULL)
+-		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
++	if (obj != NULL) {
++		struct drm_device *dev = obj->dev;
++		mutex_lock(&dev->struct_mutex);
++		kref_put(&obj->refcount, drm_gem_object_free);
++		mutex_unlock(&dev->struct_mutex);
++	}
+ }
+ 
+ int drm_gem_handle_create(struct drm_file *file_priv,
+ 			  struct drm_gem_object *obj,
+ 			  u32 *handlep);
++int drm_gem_handle_delete(struct drm_file *filp, u32 handle);
+ 
+ static inline void
+ drm_gem_object_handle_reference(struct drm_gem_object *obj)
+ {
+ 	drm_gem_object_reference(obj);
+-	kref_get(&obj->handlecount);
++	atomic_inc(&obj->handle_count);
+ }
+ 
+ static inline void

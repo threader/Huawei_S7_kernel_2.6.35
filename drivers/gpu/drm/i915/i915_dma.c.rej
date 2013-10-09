@@ -1,0 +1,143 @@
+--- drivers/gpu/drm/i915/i915_dma.c
++++ drivers/gpu/drm/i915/i915_dma.c
+@@ -612,8 +614,10 @@
+ 		ret = copy_from_user(cliprects, batch->cliprects,
+ 				     batch->num_cliprects *
+ 				     sizeof(struct drm_clip_rect));
+-		if (ret != 0)
++		if (ret != 0) {
++			ret = -EFAULT;
+ 			goto fail_free;
++		}
+ 	}
+ 
+ 	mutex_lock(&dev->struct_mutex);
+@@ -654,8 +658,10 @@
+ 		return -ENOMEM;
+ 
+ 	ret = copy_from_user(batch_data, cmdbuf->buf, cmdbuf->sz);
+-	if (ret != 0)
++	if (ret != 0) {
++		ret = -EFAULT;
+ 		goto fail_batch_free;
++	}
+ 
+ 	if (cmdbuf->num_cliprects) {
+ 		cliprects = kcalloc(cmdbuf->num_cliprects,
+@@ -668,8 +674,10 @@
+ 		ret = copy_from_user(cliprects, cmdbuf->cliprects,
+ 				     cmdbuf->num_cliprects *
+ 				     sizeof(struct drm_clip_rect));
+-		if (ret != 0)
++		if (ret != 0) {
++			ret = -EFAULT;
+ 			goto fail_clip_free;
++		}
+ 	}
+ 
+ 	mutex_lock(&dev->struct_mutex);
+@@ -877,7 +885,7 @@
+ 	int reg = IS_I965G(dev) ? MCHBAR_I965 : MCHBAR_I915;
+ 	u32 temp_lo, temp_hi = 0;
+ 	u64 mchbar_addr;
+-	int ret = 0;
++	int ret;
+ 
+ 	if (IS_I965G(dev))
+ 		pci_read_config_dword(dev_priv->bridge_dev, reg + 4, &temp_hi);
+@@ -887,22 +895,23 @@
+ 	/* If ACPI doesn't have it, assume we need to allocate it ourselves */
+ #ifdef CONFIG_PNP
+ 	if (mchbar_addr &&
+-	    pnp_range_reserved(mchbar_addr, mchbar_addr + MCHBAR_SIZE)) {
+-		ret = 0;
+-		goto out;
+-	}
++	    pnp_range_reserved(mchbar_addr, mchbar_addr + MCHBAR_SIZE))
++		return 0;
+ #endif
+ 
+ 	/* Get some space for it */
+-	ret = pci_bus_alloc_resource(dev_priv->bridge_dev->bus, &dev_priv->mch_res,
++	dev_priv->mch_res.name = "i915 MCHBAR";
++	dev_priv->mch_res.flags = IORESOURCE_MEM;
++	ret = pci_bus_alloc_resource(dev_priv->bridge_dev->bus,
++				     &dev_priv->mch_res,
+ 				     MCHBAR_SIZE, MCHBAR_SIZE,
+ 				     PCIBIOS_MIN_MEM,
+-				     0,   pcibios_align_resource,
++				     0, pcibios_align_resource,
+ 				     dev_priv->bridge_dev);
+ 	if (ret) {
+ 		DRM_DEBUG_DRIVER("failed bus alloc: %d\n", ret);
+ 		dev_priv->mch_res.start = 0;
+-		goto out;
++		return ret;
+ 	}
+ 
+ 	if (IS_I965G(dev))
+@@ -911,8 +920,7 @@
+ 
+ 	pci_write_config_dword(dev_priv->bridge_dev, reg,
+ 			       lower_32_bits(dev_priv->mch_res.start));
+-out:
+-	return ret;
++	return 0;
+ }
+ 
+ /* Setup MCHBAR if possible, return true if we should disable it again */
+@@ -1772,9 +1780,9 @@
+ 		}
+ 	}
+ 
+-	div_u64(diff, diff1);
++	diff = div_u64(diff, diff1);
+ 	ret = ((m * diff) + c);
+-	div_u64(ret, 10);
++	ret = div_u64(ret, 10);
+ 
+ 	dev_priv->last_count1 = total_count;
+ 	dev_priv->last_time1 = now;
+@@ -1843,7 +1851,7 @@
+ 
+ 	/* More magic constants... */
+ 	diff = diff * 1181;
+-	div_u64(diff, diffms * 10);
++	diff = div_u64(diff, diffms * 10);
+ 	dev_priv->gfx_power = diff;
+ }
+ 
+@@ -2073,6 +2081,10 @@
+ 		goto free_priv;
+ 	}
+ 
++	/* overlay on gen2 is broken and can't address above 1G */
++	if (IS_GEN2(dev))
++		dma_set_coherent_mask(&dev->pdev->dev, DMA_BIT_MASK(30));
++
+ 	dev_priv->regs = ioremap(base, size);
+ 	if (!dev_priv->regs) {
+ 		DRM_ERROR("failed to map registers\n");
+@@ -2106,6 +2118,12 @@
+ 	if (ret)
+ 		goto out_iomapfree;
+ 
++	if (prealloc_size > intel_max_stolen) {
++		DRM_INFO("detected %dM stolen memory, trimming to %dM\n",
++			 prealloc_size >> 20, intel_max_stolen >> 20);
++		prealloc_size = intel_max_stolen;
++	}
++
+ 	dev_priv->wq = create_singlethread_workqueue("i915");
+ 	if (dev_priv->wq == NULL) {
+ 		DRM_ERROR("Failed to create our workqueue.\n");
+@@ -2281,6 +2302,9 @@
+ 		i915_gem_lastclose(dev);
+ 
+ 		intel_cleanup_overlay(dev);
++
++		if (!I915_NEED_GFX_HWS(dev))
++			i915_free_hws(dev);
+ 	}
+ 
+ 	intel_teardown_mchbar(dev);

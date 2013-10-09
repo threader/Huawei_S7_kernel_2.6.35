@@ -1,0 +1,61 @@
+--- drivers/gpu/drm/radeon/radeon_atombios.c
++++ drivers/gpu/drm/radeon/radeon_atombios.c
+@@ -333,13 +358,22 @@
+ 		}
+ 	}
+ 
+-	/* Acer laptop reports DVI-D as DVI-I */
++	/* Acer laptop reports DVI-D as DVI-I and hpd pins reversed */
+ 	if ((dev->pdev->device == 0x95c4) &&
+ 	    (dev->pdev->subsystem_vendor == 0x1025) &&
+ 	    (dev->pdev->subsystem_device == 0x013c)) {
++		struct radeon_gpio_rec gpio;
++
+ 		if ((*connector_type == DRM_MODE_CONNECTOR_DVII) &&
+-		    (supported_device == ATOM_DEVICE_DFP1_SUPPORT))
++		    (supported_device == ATOM_DEVICE_DFP1_SUPPORT)) {
++			gpio = radeon_lookup_gpio(rdev, 6);
++			*hpd = radeon_atom_get_hpd_info_from_gpio(rdev, &gpio);
+ 			*connector_type = DRM_MODE_CONNECTOR_DVID;
++		} else if ((*connector_type == DRM_MODE_CONNECTOR_HDMIA) &&
++			   (supported_device == ATOM_DEVICE_DFP1_SUPPORT)) {
++			gpio = radeon_lookup_gpio(rdev, 7);
++			*hpd = radeon_atom_get_hpd_info_from_gpio(rdev, &gpio);
++		}
+ 	}
+ 
+ 	/* XFX Pine Group device rv730 reports no VGA DDC lines
+@@ -1074,7 +1108,7 @@
+ 			}
+ 			break;
+ 		case 2:
+-			if (igp_info->info_2.ucMemoryType & 0x0f)
++			if (igp_info->info_2.ulBootUpSidePortClock)
+ 				return true;
+ 			break;
+ 		default:
+@@ -2116,7 +2150,7 @@
+ 	bios_2_scratch &= ~ATOM_S2_VRI_BRIGHT_ENABLE;
+ 
+ 	/* tell the bios not to handle mode switching */
+-	bios_6_scratch |= (ATOM_S6_ACC_BLOCK_DISPLAY_SWITCH | ATOM_S6_ACC_MODE);
++	bios_6_scratch |= ATOM_S6_ACC_BLOCK_DISPLAY_SWITCH;
+ 
+ 	if (rdev->family >= CHIP_R600) {
+ 		WREG32(R600_BIOS_2_SCRATCH, bios_2_scratch);
+@@ -2167,10 +2201,13 @@
+ 	else
+ 		bios_6_scratch = RREG32(RADEON_BIOS_6_SCRATCH);
+ 
+-	if (lock)
++	if (lock) {
+ 		bios_6_scratch |= ATOM_S6_CRITICAL_STATE;
+-	else
++		bios_6_scratch &= ~ATOM_S6_ACC_MODE;
++	} else {
+ 		bios_6_scratch &= ~ATOM_S6_CRITICAL_STATE;
++		bios_6_scratch |= ATOM_S6_ACC_MODE;
++	}
+ 
+ 	if (rdev->family >= CHIP_R600)
+ 		WREG32(R600_BIOS_6_SCRATCH, bios_6_scratch);

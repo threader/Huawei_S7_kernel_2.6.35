@@ -1,0 +1,14 @@
+--- drivers/gpu/drm/drm_gem.c
++++ drivers/gpu/drm/drm_gem.c
+@@ -506,7 +488,10 @@
+ {
+ 	struct drm_gem_object *obj = vma->vm_private_data;
+ 
+-	drm_gem_object_unreference_unlocked(obj);
++	mutex_lock(&obj->dev->struct_mutex);
++	drm_vm_close_locked(vma);
++	drm_gem_object_unreference(obj);
++	mutex_unlock(&obj->dev->struct_mutex);
+ }
+ EXPORT_SYMBOL(drm_gem_vm_close);
+ 

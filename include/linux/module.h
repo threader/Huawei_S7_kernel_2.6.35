@@ -16,6 +16,7 @@
 #include <linux/kobject.h>
 #include <linux/moduleparam.h>
 #include <linux/tracepoint.h>
+#include <linux/export.h>
 
 #include <linux/percpu.h>
 #include <asm/module.h>
@@ -33,12 +34,12 @@
 #endif
 
 #define MODULE_NAME_LEN MAX_PARAM_PREFIX_LEN
-
+/*
 struct kernel_symbol
 {
 	unsigned long value;
 	const char *name;
-};
+};*/
 
 struct modversion_info
 {
@@ -202,7 +203,7 @@ struct module_use {
 #define __CRC_SYMBOL(sym, sec)
 #endif
 
-/* For every exported symbol, place a struct in the __ksymtab section */
+/* For every exported symbol, place a struct in the __ksymtab section 
 #define __EXPORT_SYMBOL(sym, sec)				\
 	extern typeof(sym) sym;					\
 	__CRC_SYMBOL(sym, sec)					\
@@ -221,7 +222,7 @@ struct module_use {
 	__EXPORT_SYMBOL(sym, "_gpl")
 
 #define EXPORT_SYMBOL_GPL_FUTURE(sym)				\
-	__EXPORT_SYMBOL(sym, "_gpl_future")
+	__EXPORT_SYMBOL(sym, "_gpl_future")*/
 
 
 #ifdef CONFIG_UNUSED_SYMBOLS

@@ -93,8 +93,20 @@
 
 //#define MSM_PMEM_ADSP_SIZE	0x2A05000
 #define MSM_PMEM_ADSP_SIZE	0x2B96000
-#define MSM_FB_SIZE 0xD00000
+
+#ifdef CONFIG_MSM_HDMI
+    #define MSM_HDMI_SIZE 0x300000
+#else
+    #define MSM_HDMI_SIZE 0
+#endif
+#ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
+    #define MSM_FB_SIZE (800 * 480 * 4 * 3) + MSM_HDMI_SIZE
+#else
+    #define MSM_FB_SIZE (800 * 480 * 4 * 2) + MSM_HDMI_SIZE
+#endif
 //#define MSM_FB_SIZE         0x2EE000
+#define MSM_FB_SIZE 0xD00000
+
 #define MSM_AUDIO_SIZE		0x80000
 //#define MSM_GPU_PHYS_SIZE 	SZ_2M
 
@@ -115,7 +127,7 @@
 
 #define PMEM_KERNEL_EBI1_SIZE	0x28000
 
-
+/*
 #define MSM_RAM_CONSOLE_BASE  (MSM_SMI_BASE + 0x00100000 - SZ_256K)
 #define MSM_RAM_CONSOLE_SIZE    SZ_256K
 
@@ -135,7 +147,7 @@ static struct platform_device ram_console_device = {
         .id             = -1,
         .num_resources  = ARRAY_SIZE(ram_console_resources),
         .resource       = ram_console_resources,
-};
+};*/
 
 #define PMIC_VREG_WLAN_LEVEL	2600
 #define PMIC_VREG_GP6_LEVEL	2900
@@ -464,24 +476,6 @@ static struct msm_hsusb_platform_data msm_hsusb_pdata = {
 
 #endif
 };
-
-/*
-struct msm_hsusb_platform_data msm_hsusb_pdata = {
-	.phy_reset = internal_phy_reset,
-	.phy_init_seq = hsusb_phy_init_seq,
-#ifdef CONFIG_USB_FUNCTION
-	.vendor_id = 0x0bb4,
-	.product_id = 0x0c02,
-	.version = 0x0100,
-	.product_name = "Android Phone",
-	.manufacturer_name = "HTC",
-
-	.functions = usb_functions,
-	.num_functions = ARRAY_SIZE(usb_functions),
-	.products = usb_products,
-	.num_products = ARRAY_SIZE(usb_products),
-#endif
-};*/
 
 static struct vreg *vreg_usb;
 static void msm_hsusb_vbus_power(unsigned phy_info, int on)
@@ -2664,7 +2658,7 @@ static struct platform_device *devices[] __initdata = {
 	&msm_fb_device,
 	&mddi_toshiba_device,
 	&smc91x_device,
-    &ram_console_device,
+  //  &ram_console_device,
 	&msm_device_smd,
 	&msm_device_dmov,
 	&android_pmem_kernel_ebi1_device,

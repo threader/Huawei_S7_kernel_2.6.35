@@ -345,7 +345,7 @@ po188_wait_for_event(struct work_struct *work)
 		//input_sync(po188_driver.input_dev);
         input_report_rel(po188_driver.input_dev, REL_LIGHT,  po188_driver.voltage_now);			
 		input_sync(po188_driver.input_dev);
-		po188_driver.vol_flag = false; 
+		//po188_driver.vol_flag = false; 
         po188_driver.last_voltage = po188_driver.voltage_now;
 	}
 	//po188_driver.last_voltage = po188_driver.current_voltage;

@@ -199,6 +199,9 @@ source "drivers/input/pedestal/Kconfig"
 
 source "drivers/input/cypress_120/Kconfig"
 
+source "drivers/input/dock/Kconfig"
+
+source "drivers/input/belasigna/Kconfig"
 endif
 
 menu "Hardware I/O ports"

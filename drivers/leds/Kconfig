@@ -405,6 +405,10 @@ config LEDS_TRIGGER_SLEEP
 comment "iptables trigger is under Netfilter config (LED target)"
 	depends on LEDS_TRIGGERS
 
+endif # LEDS_TRIGGERS
+
+endif # LEDS_CLASS
+
 config HUAWEI_LEDS_BASE
 	tristate "LED support for Huawei interface base LEDs"
 	depends on MACH_QSD8X50_SURF_S70
@@ -416,9 +420,5 @@ config HUAWEI_INCIDENT_LED_NEW
        depends on MACH_QSD8X50_SURF_S70
        help
 	Support for Huawei Incident LED. 
-
-endif # LEDS_TRIGGERS
-
-endif # LEDS_CLASS
 
 endif # NEW_LEDS

@@ -60,7 +60,7 @@
  *  Dock detect driver.
  *
  */
-
+#include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <mach/gpio.h>
 #include <linux/platform_device.h>

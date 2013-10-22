@@ -148,7 +148,7 @@ static int __init DRV_LedDevInit(void)
         return -1;
     }
     
-    ret = gpio_tlmm_config(GPIO_CFG(LED_GPIO_INCIDENT_LED, 0, GPIO_OUTPUT, GPIO_PULL_DOWN, GPIO_2MA), GPIO_ENABLE);
+    ret = gpio_tlmm_config(GPIO_CFG(LED_GPIO_INCIDENT_LED, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
     if(ret < 0) 
     {
         printk("gpio_tlmm_config failed.\n");

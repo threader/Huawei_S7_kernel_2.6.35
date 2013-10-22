@@ -141,6 +141,16 @@ static struct platform_device ram_console_device = {
 
 #define FPGA_SDCC_STATUS	0x70000280
 
+static inline void mmc_delay(unsigned int ms)
+{
+	if (ms < 1000 / HZ) {
+		cond_resched();
+		mdelay(ms);
+	} else {
+		msleep(ms);
+	}
+}
+
 static struct resource smc91x_resources[] = {
 	[0] = {
 		.flags  = IORESOURCE_MEM,
@@ -2727,6 +2737,7 @@ static void __init qsd8x50_init_usb(void)
 #endif
 }
 
+static struct vreg *vreg_emmc;
 static struct vreg *vreg_mmc;
 
 #if (defined(CONFIG_MMC_MSM_SDC1_SUPPORT)\
@@ -2824,6 +2835,45 @@ static void msm_sdcc_setup_gpio(int dev_id, unsigned int enable)
 	}
 }
 
+#if HUAWEI_HWID(S70)
+#define GPIO_SD1_CD			157
+static struct semaphore sdcc_sts_sem;
+static int vreg_mmc_control(int sdcc_id, int on)
+{
+	int rc = 0;
+
+    if (on == 0) {
+		if (vreg_sts) {
+		    clear_bit(sdcc_id, &vreg_sts);
+		    if (!vreg_sts) {
+		        rc = vreg_disable(vreg_mmc);
+                I("Switching %s vreg_mmc %s", 
+                    on ? "ON" : "OFF", rc ? "failed" : "OK");
+                mmc_delay(10);
+		    }
+        }
+	} else {
+	    if (!vreg_sts) {
+	        rc = vreg_set_level(vreg_mmc, PMIC_VREG_GP6_LEVEL);
+            mmc_delay(10);
+	        if (!rc) {
+	            rc = vreg_enable(vreg_mmc);
+                mmc_delay(10);
+	        }
+            I("Switching %s vreg_mmc %s", 
+                on ? "ON" : "OFF", rc ? "failed" : "OK");
+	    }
+        set_bit(sdcc_id, &vreg_sts);
+	}
+
+//    I("vreg_mmc control status: vreg_sts=%08x sdccid=%d on=%d", 
+//       (uint32_t)vreg_sts, sdcc_id, on);
+    
+    return rc;
+}
+#endif
+
+#if !HUAWEI_HWID(S70)
 static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
 {
 	int rc = 0;
@@ -2858,8 +2908,35 @@ static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
 	set_bit(pdev->id, &vreg_sts);
 	return 0;
 }
+#else
+static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
+{
+	struct platform_device *pdev;
+    
+	pdev = container_of(dv, struct platform_device, dev);
 
+    down(&sdcc_sts_sem);
+
+	msm_sdcc_setup_gpio(pdev->id, !!vdd);
+	mmc_delay(10);
+
+	/* 
+	 * !!! we should always keep SD Card(VREG_P6) on because of bug of PMIC7540 
+	 *     and avoiding SD Card re-detect by vold result in causing remounting, 
+     *     sounding and screen on
+	 */
+#ifdef CONFIG_MMC_MSM_NOT_REMOVE_CARD_WHEN_SUSPEND
+	vreg_mmc_control(pdev->id, 1);
+#else
+	vreg_mmc_control(pdev->id, !!vdd);
 #endif
+    up(&sdcc_sts_sem);
+
+	return 0;
+}
+#endif
+#endif
+
 #if (defined(CONFIG_MMC_MSM_SDC1_SUPPORT)\
 	|| defined(CONFIG_MMC_MSM_SDC2_SUPPORT)\
 	|| defined(CONFIG_MMC_MSM_SDC4_SUPPORT))
@@ -2891,6 +2968,13 @@ static int msm_sdcc_get_wpswitch(struct device *dv)
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
+#if defined(CONFIG_MMC_MSM_CARD_HW_DETECTION) && HUAWEI_HWID(S70)
+static unsigned int qsd8x50_sdc1_slot_status(struct device *dev)
+{
+	return !(unsigned int)gpio_get_value(GPIO_SD1_CD);
+}
+#endif
+
 static struct mmc_platform_data qsd8x50_sdc1_data = {
 	.ocr_mask	= MMC_VDD_27_28 | MMC_VDD_28_29,
 	.translate_vdd	= msm_sdcc_setup_power,
@@ -2898,6 +2982,11 @@ static struct mmc_platform_data qsd8x50_sdc1_data = {
 	.wpswitch	= msm_sdcc_get_wpswitch,
 #ifdef CONFIG_MMC_MSM_SDC1_DUMMY52_REQUIRED
 	.dummy52_required = 1,
+#endif
+#if defined(CONFIG_MMC_MSM_CARD_HW_DETECTION) && HUAWEI_HWID(S70)
+    .status = qsd8x50_sdc1_slot_status,
+    .status_irq = MSM_GPIO_TO_INT(GPIO_SD1_CD),
+	.irq_flags = IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING,
 #endif
 	.msmsdcc_fmin	= 144000,
 	.msmsdcc_fmid	= 25000000,
@@ -2907,6 +2996,8 @@ static struct mmc_platform_data qsd8x50_sdc1_data = {
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
+#if !HUAWEI_HWID(S70)
+
 static struct mmc_platform_data qsd8x50_sdc2_data = {
 	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29,
 	.translate_vdd  = msm_sdcc_setup_power,
@@ -2920,12 +3011,88 @@ static struct mmc_platform_data qsd8x50_sdc2_data = {
 	.msmsdcc_fmax	= 49152000,
 	.nonremovable	= 1,
 };
+
+#else
+#include "board-qsd8x50-s7-20x.h"
+static struct mmc_platform_data qsd8x50_wlan_data = {
+	.ocr_mask	= MMC_VDD_27_28 | MMC_VDD_28_29,
+	.translate_vdd	= msm_pm_setup_status,
+    .mmc_bus_width  = MMC_CAP_4_BIT_DATA,
+    .wpswitch   = msm_sdcc_get_wpswitch,
+#ifdef CONFIG_MMC_MSM_SDC2_DUMMY52_REQUIRED
+    .dummy52_required = 1,
+#endif
+	.msmsdcc_fmin	= 144000,
+	.msmsdcc_fmid	= 25000000,
+	.msmsdcc_fmax	= 49152000,
+	.nonremovable	= 1,
+	.status			= qsd8x50_wlan_status,
+	.register_status_notify	= qsd8x50_register_status_notify,
+};
+#endif
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
+#if HWVERID_HIGHER(S70, T1)
+static uint32_t msm_sdcc3_setup_power(struct device *dv, unsigned int vdd)
+{
+	int rc = 0;
+	struct platform_device *pdev;
+    int on = !!vdd;
+
+	pdev = container_of(dv, struct platform_device, dev);
+
+    down(&sdcc_sts_sem);
+
+	msm_sdcc_setup_gpio(pdev->id, !!vdd);
+    mmc_delay(10);
+
+    /* 
+     * !!! we should always keep SD Card(VREG_P6) on because of bug of PMIC7540 
+     *     and avoiding SD Card re-detect by vold result in causing remounting, 
+     *     sounding and screen on
+     */
+#ifdef CONFIG_MMC_MSM_NOT_REMOVE_CARD_WHEN_SUSPEND
+	on = 1;
+#endif
+
+	if (on == 0) {
+		if (test_bit(pdev->id, &vreg_sts)) {
+	        if (vreg_emmc) {
+	            rc = vreg_disable(vreg_emmc);
+	            mmc_delay(10);            
+		        I("Switching %s vreg_emmc in %s %s", 
+		            on ? "ON" : "OFF", __FUNCTION__, rc ? "failed" : "OK");
+	        }
+            vreg_mmc_control(pdev->id, on);
+        }
+	} else {
+		if (!test_bit(pdev->id, &vreg_sts)) {
+            vreg_mmc_control(pdev->id, on);
+		    if (vreg_emmc) {
+		        rc = vreg_set_level(vreg_emmc, 2850);
+	            mmc_delay(10);
+	            rc = vreg_enable(vreg_emmc);
+	            mmc_delay(10);
+		        I("Switching %s vreg_emmc in %s %s", 
+		            on ? "ON" : "OFF", __FUNCTION__, rc ? "failed" : "OK");
+		    }
+        }
+    }
+
+    up(&sdcc_sts_sem);
+    
+	return 0;
+}
+#endif
+
 static struct mmc_platform_data qsd8x50_sdc3_data = {
 	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29,
-	.translate_vdd  = msm_sdcc_setup_power,
+#if HWVERID_HIGHER(S70, T1)
+    .translate_vdd  = msm_sdcc3_setup_power,
+#else
+    .translate_vdd  = msm_sdcc_setup_power,
+#endif
 #ifdef CONFIG_MMC_MSM_SDC3_8_BIT_SUPPORT
 	.mmc_bus_width  = MMC_CAP_8_BIT_DATA,
 #else
@@ -2959,10 +3126,15 @@ static struct mmc_platform_data qsd8x50_sdc4_data = {
 
 static void __init qsd8x50_init_mmc(void)
 {
+#if HWVERID_HIGHER(S70, T1)
+    init_MUTEX(&sdcc_sts_sem);
+	vreg_mmc = vreg_get(NULL, "gp6");
+#else
 	if (machine_is_qsd8x50_ffa() || machine_is_qsd8x50a_ffa())
 		vreg_mmc = vreg_get(NULL, "gp6");
 	else
 		vreg_mmc = vreg_get(NULL, "gp5");
+#endif
 
 	if (IS_ERR(vreg_mmc)) {
 		printk(KERN_ERR "%s: vreg get failed (%ld)\n",
@@ -2970,15 +3142,41 @@ static void __init qsd8x50_init_mmc(void)
 		return;
 	}
 
+#if defined(CONFIG_MMC_MSM_CARD_HW_DETECTION) && HUAWEI_HWID(S70)
+    if (gpio_request(GPIO_SD1_CD, "sdc1_status_irq"))
+        I("request GPIO %d for sdc1_status_irq failed", GPIO_SD1_CD);
+    else
+        I("request GPIO %d OK", GPIO_SD1_CD);
+    if (gpio_tlmm_config(GPIO_CFG(GPIO_SD1_CD, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+        				 GPIO_CFG_ENABLE)) {
+        I("configure GPIO %d failed", GPIO_SD1_CD);
+        gpio_free(GPIO_SD1_CD);
+        return;
+    } else 
+        I("configure GPIO %d OK", GPIO_SD1_CD);
+#endif
+
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
 	msm_add_sdcc(1, &qsd8x50_sdc1_data);
 #endif
 
 	if (machine_is_qsd8x50_surf() || machine_is_qsd8x50a_surf()) {
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
+#if HWVERID_HIGHER(S70, T1)
+		msm_add_sdcc(2, &qsd8x50_wlan_data);
+#else
 		msm_add_sdcc(2, &qsd8x50_sdc2_data);
 #endif
+#endif
+
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
+#if HWVERID_HIGHER(S70, A)
+        vreg_emmc = vreg_get(NULL, "wlan");
+        if (IS_ERR(vreg_emmc)) {
+    		printk(KERN_ERR "%s: vreg get failed (%ld)\n",
+    		       __func__, PTR_ERR(vreg_emmc));
+	    }
+#endif
 		msm_add_sdcc(3, &qsd8x50_sdc3_data);
 #endif
 #ifdef CONFIG_MMC_MSM_SDC4_SUPPORT
@@ -3330,6 +3528,19 @@ static int bs300_power_init(int on)
 
 static void __init qsd8x50_init(void)
 {
+#if HUAWEI_HWID(S70)
+    if (gpio_request(GPIO_GPS_LNA_EN, "gps_lna_en")) {
+	    pr_err("gpio_request failed on pin %d\n", GPIO_GPS_LNA_EN);
+	} else
+		gpio_direction_output(GPIO_GPS_LNA_EN, 1);
+#endif
+
+#ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
+#if HWVERID_HIGHER(S70, T1)
+	bcm4325_pm_init();
+#endif
+#endif
+
 	if (socinfo_init() < 0)
 		printk(KERN_ERR "%s: socinfo_init() failed!\n",
 		       __func__);

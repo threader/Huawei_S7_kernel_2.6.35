@@ -185,12 +185,12 @@ int pedestal_i2c_read_byte_data(struct i2c_client *client, unsigned char command
 	
 static struct msm_gpio pedestal_gpio_cfg[] = {
 	#if(IRDA_GPIO_INVERTED)
-	{ GPIO_CFG(PEDESTAL_INT_GPIO, 0, GPIO_INPUT, GPIO_PULL_DOWN, GPIO_2MA),"pedestal_irda_irq" },  //interface pedestal irda remote control gpio
+	{ GPIO_CFG(PEDESTAL_INT_GPIO, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),"pedestal_irda_irq" },  //interface pedestal irda remote control gpio
 	#else
-	{ GPIO_CFG(PEDESTAL_INT_GPIO, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_2MA),"pedestal_irda_irq" },
+	{ GPIO_CFG(PEDESTAL_INT_GPIO, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),"pedestal_irda_irq" },
 	#endif
 
-	{ GPIO_CFG(PEDESTAL_INT_GPIO, 0, GPIO_INPUT, GPIO_PULL_UP, GPIO_2MA),"pedestal_i2c_irq" },   //sound box pedestal i2c irq gpio
+	{ GPIO_CFG(PEDESTAL_INT_GPIO, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),"pedestal_i2c_irq" },   //sound box pedestal i2c irq gpio
 };
 
 int pedestal_gpio_setup(unsigned int pedestal_type)

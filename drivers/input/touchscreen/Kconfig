@@ -336,6 +336,40 @@ config TOUCHSCREEN_MIGOR
 	  To compile this driver as a module, choose M here: the
 	  module will be called migor_ts.
 
+config TOUCHSCREEN_T1320
+	tristate "T1320 Capacitive Touchscreen"
+	depends on I2C
+	help
+	  This enables support for T1320 based touchscreens.
+
+config SYNA_BUTTONS
+	bool "T1320 buttons (reported as buttons)"
+	depends on TOUCHSCREEN_T1320
+
+config SYNA_BUTTONS_SCROLL
+	bool "T1320 buttons reported as relative motion (scroll strip)"
+	depends on TOUCHSCREEN_T1320
+
+config SYNA_MOUSE
+	bool "T1320 pointing compatible with old single-point touch systems"
+	depends on TOUCHSCREEN_T1320
+
+config SYNA_MT
+	bool "T1320 pointing using Linux 2.6.31 multi-touch system"
+	depends on TOUCHSCREEN_T1320
+
+config UPDATE_TS_FIRMWARE
+	bool "Surport download t1320 firmware function"
+	depends on TOUCHSCREEN_T1320
+config TOUCHSCREEN_MXT224
+	tristate "mXT224 based touchscreens"
+	depends on I2C
+	help
+	  Say Y here if you have a mXT224 based touchscreen.
+	  If unsure, say N.
+	  To compile this driver as a module, choose M here: the
+	  module will be called mxt224
+
 config TOUCHSCREEN_SYNAPTICS_I2C_RMI
 	tristate "Synaptics i2c touchscreen"
 	depends on I2C

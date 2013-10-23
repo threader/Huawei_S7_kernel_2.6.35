@@ -64,6 +64,7 @@
 #include "pm.h"
 #include "proc_comm.h"
 #include <linux/msm_kgsl.h>
+#include "smd_private.h"
 #ifdef CONFIG_USB_ANDROID
 #include <linux/usb/android_composite.h>
 //#include <linux/usb/android.h>
@@ -74,10 +75,11 @@
 #include "board-qsd8x50-s7-extra.h" /* TRY TO KEEP IT CLEAN IN HERE! */
 
 
-//#define MSM_PMEM_SF_SIZE	0x1700000
-#define MSM_PMEM_SF_SIZE 	0x1C99000
+#define MSM_PMEM_SF_SIZE	0x1700000
+//#define MSM_PMEM_SF_SIZE 	0x1C99000
 
 #define SMEM_SPINLOCK_I2C	"S:6"
+
 //#define MSM_PMEM_ADSP_SIZE	0x2A05000
 #define MSM_PMEM_ADSP_SIZE	0x2B96000
 
@@ -95,7 +97,7 @@
 #define MSM_FB_SIZE 0xD00000
 
 #define MSM_AUDIO_SIZE		0x80000
-#define MSM_GPU_PHYS_SIZE 	SZ_2M
+//#define MSM_GPU_PHYS_SIZE 	SZ_2M
 
 #ifdef CONFIG_MSM_SOC_REV_A
 #define MSM_SMI_BASE		0xE0000000

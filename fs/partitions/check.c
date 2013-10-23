@@ -653,7 +653,7 @@ rescan:
 	/* add partitions */
 	for (p = 1; p < state->limit; p++) {
 		sector_t size, from;
-
+try_scan:
 		size = state->parts[p].size;
 		if (!size)
 			continue;
@@ -669,13 +669,25 @@ rescan:
 		}
 
 		if (from + size > get_capacity(disk)) {
+
+			const struct block_device_operations *bdops = disk->fops;
+			unsigned long long capacity;
+
 			printk(KERN_WARNING
-			       "%s: p%d size %llu extends beyond EOD, ",
+			       "%s: p%d size %llu exceeds device capacity, ",
 			       disk->disk_name, p, (unsigned long long) size);
 
-			if (disk_unlock_native_capacity(disk)) {
-				/* free state and restart */
-				goto rescan;
+			if (bdops->set_capacity &&
+			    (disk->flags & GENHD_FL_NATIVE_CAPACITY) == 0) {
+				printk(KERN_CONT "enabling native capacity\n");
+				capacity = bdops->set_capacity(disk, ~0ULL);
+				disk->flags |= GENHD_FL_NATIVE_CAPACITY;
+				if (capacity > get_capacity(disk)) {
+					set_capacity(disk, capacity);
+					check_disk_size_change(disk, bdev);
+					bdev->bd_invalidated = 0;
+				}
+				goto try_scan;
 			} else {
 				/*
 				 * we can not ignore partitions of broken tables
@@ -683,6 +695,7 @@ rescan:
 				 * we limit them to the end of the disk to avoid
 				 * creating invalid block devices
 				 */
+				printk(KERN_CONT "limited to end of disk\n");
 				size = get_capacity(disk) - from;
 			}
 		}

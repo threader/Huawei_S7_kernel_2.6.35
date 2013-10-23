@@ -99,8 +99,10 @@ static int lcdc_off(struct platform_device *pdev)
 {
 	int ret = 0;
 	struct msm_fb_data_type *mfd;
+	printk(KERN_INFO "*************lcdc_off*************");
 
 	mfd = platform_get_drvdata(pdev);
+
 #if HUAWEI_HWID_L2(S7, S7201)
 	int is_usb_connected = 0;
     unsigned is_screen_on = 0, is_usb_connect = 0;
@@ -148,6 +150,8 @@ static int lcdc_on(struct platform_device *pdev)
 #ifndef CONFIG_MSM_BUS_SCALING
 	unsigned long pm_qos_rate;
 #endif
+
+      printk(KERN_INFO "*************lcdc_on*************");
 	mfd = platform_get_drvdata(pdev);
 
 	if (lcdc_pdata && lcdc_pdata->lcdc_get_clk)
@@ -172,6 +176,8 @@ static int lcdc_on(struct platform_device *pdev)
 
 	printk(KERN_ERR "lcdc_on: screen on!,is_usb_connected = %d\n",is_usb_connected);
 #endif
+
+
 
 #ifdef CONFIG_MSM_BUS_SCALING
 	mdp_bus_scale_update_request(2);
@@ -223,6 +229,8 @@ static int lcdc_probe(struct platform_device *pdev)
 	struct platform_device *mdp_dev = NULL;
 	struct msm_fb_panel_data *pdata = NULL;
 	int rc;
+
+	printk(KERN_INFO "*************lcdc_probe*************");
 
 	if (pdev->id == 0) {
 		lcdc_pdata = pdev->dev.platform_data;

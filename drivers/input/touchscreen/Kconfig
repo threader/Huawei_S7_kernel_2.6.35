@@ -374,6 +374,12 @@ config TOUCHSCREEN_MXT224
 	  If unsure, say N.
 	  To compile this driver as a module, choose M here: the
 	  module will be called mxt224
+config UPDATE_MXT224_FIRMWARE
+	bool "Surport download mxt224 firmware function"
+	depends on TOUCHSCREEN_MXT224
+config DEBUG_MXT224_FIRMWARE
+	bool "Surport debug mxt224 firmware function"
+	depends on UPDATE_MXT224_FIRMWARE
 
 config TOUCHSCREEN_SYNAPTICS_I2C_RMI
 	tristate "Synaptics i2c touchscreen"

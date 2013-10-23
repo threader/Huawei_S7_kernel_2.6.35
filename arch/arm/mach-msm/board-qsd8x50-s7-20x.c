@@ -64,14 +64,13 @@
 #include "pm.h"
 #include "proc_comm.h"
 #include <linux/msm_kgsl.h>
-#include "smd_private.h"
 #ifdef CONFIG_USB_ANDROID
 #include <linux/usb/android_composite.h>
 //#include <linux/usb/android.h>
 #endif
 
-//#define TOUCHPAD_SUSPEND 	34
-//#define TOUCHPAD_IRQ 		38
+#define TOUCHPAD_SUSPEND 	34
+#define TOUCHPAD_IRQ 		38
 #include "board-qsd8x50-s7-extra.h" /* TRY TO KEEP IT CLEAN IN HERE! */
 
 
@@ -79,7 +78,6 @@
 //#define MSM_PMEM_SF_SIZE 	0x1C99000
 
 #define SMEM_SPINLOCK_I2C	"S:6"
-
 //#define MSM_PMEM_ADSP_SIZE	0x2A05000
 #define MSM_PMEM_ADSP_SIZE	0x2B96000
 
@@ -1700,13 +1698,73 @@ static struct compass_platform_data compass_pdata = {
 #define GPIO_CTP_POWER   		(105)
 #define GPIO_CTP_RESET       	(158)
 
+static int ctp_gpio_setup(int enable)
+{
+	int status = 0;
+    
+	if (enable) {
+ 		status = gpio_request(GPIO_CTP_POWER, "3v3_en");
+		if (status) {
+			pr_err("%s:Failed to request GPIO %d\n",
+						__func__, GPIO_CTP_POWER);
+			return status;
+		}
+        
+		status = gpio_direction_output(GPIO_CTP_POWER, 1);
+		if (status) {
+			pr_err("%s:Failed to configure GPIO %d\n",
+					__func__, GPIO_CTP_POWER);
+			goto gpio_free_3v3_en;
+		}
+        
+		status = gpio_request(GPIO_CTP_INT, "ctp_irq");
+		if (status) {
+			pr_err("%s:Failed to request GPIO %d\n",
+						__func__, GPIO_CTP_INT);
+			return status;
+		}
+        
+		status = gpio_direction_input(GPIO_CTP_INT);
+		if (status) {
+			pr_err("%s:Failed to configure GPIO %d\n",
+					__func__, GPIO_CTP_INT);
+			goto gpio_free_int;
+		}
+        
+		status = gpio_request(GPIO_CTP_RESET, "ctp_reset");
+		if (status) {
+			pr_err("%s:Failed to request GPIO %d\n",
+						__func__, GPIO_CTP_RESET);
+			goto gpio_free_int;
+		}
+
+		status = gpio_direction_output(GPIO_CTP_RESET, 1);
+		if (status) {
+			pr_err("%s:Failed to configure GPIO %d\n",
+					__func__, GPIO_CTP_RESET);
+			goto gpio_free_rst;
+		}
+
+		pr_debug("\nISP GPIO configuration done\n");
+		return status;
+	}
+
+gpio_free_3v3_en:
+	gpio_free(GPIO_CTP_POWER);
+gpio_free_rst:
+	gpio_free(GPIO_CTP_INT);
+gpio_free_int:
+	gpio_free(GPIO_CTP_RESET);
+	return status;
+}
+
 static struct msm_gpio ctp_cfg[] = {
 	{ GPIO_CFG(GPIO_CTP_INT, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),"ctp_irq" },
 	{ GPIO_CFG(GPIO_CTP_RESET, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),"ctp_reset" },
 	{ GPIO_CFG(GPIO_CTP_POWER, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), "ctp_power" },
 };
 
-static int ctp_vbus_ctrl(int on)
+static int ctp_vbus_ctrl(int vreg_on)
 {
 	struct vreg *vreg_gp5;
 	int rc=0;
@@ -1725,7 +1783,7 @@ static int ctp_vbus_ctrl(int on)
 		return -EIO;
 	}
 	
-	if(on)
+   if (vreg_on)
 	{
 		rc = vreg_enable(vreg_gp5);
 		if (rc)
@@ -1745,10 +1803,20 @@ static int ctp_vbus_ctrl(int on)
 	}        
 	return 0;
 }
+static int ctp_chip_reset(void)
+{
+     	gpio_set_value(GPIO_CTP_RESET, 1);
+    	msleep(5);
+    	gpio_set_value(GPIO_CTP_RESET, 0);
+    	msleep(5);
+    	gpio_set_value(GPIO_CTP_RESET, 1);
+    	msleep(100);
+	return 1 ;
+}
 
 static void ctp_exit_platform_hw(void)
 {
-	ctp_vbus_ctrl(0);
+	ctp_gpio_setup(0);
 	msm_gpios_disable_free(ctp_cfg, ARRAY_SIZE(ctp_cfg));
 }
 
@@ -1756,20 +1824,73 @@ static int ctp_init_platform_hw(void)
 {
 	int rc = -ENODEV;
 
+    rc = ctp_gpio_setup(1);
+    if (rc < 0) 
+        return rc ;        
+	/*rc = ctp_vbus_setup(1);
+    if (rc < 0) 
+        return rc ; */   
+
 	rc = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
 	if (rc < 0) {
 		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, rc);
 	}  
-	
-	ctp_vbus_ctrl(1);
+
 	gpio_set_value(GPIO_CTP_POWER, 1);
+	ctp_vbus_ctrl(1);
+
+
+	ctp_chip_reset();
+/*
+	gpio_set_value(GPIO_CTP_RESET, 1);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 0);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 1);
-	mdelay(50);
+	mdelay(50);*/
 	return rc;
 }
+static int get_interrupts_status(void)
+{
+	return gpio_get_value(GPIO_CTP_INT);
+}
+static int ctp_power_off(void)
+{
+    gpio_set_value(GPIO_CTP_POWER, 0);
+    	ctp_vbus_ctrl(0);
+	//config_boost_5v_gpio(0);
+	return 1 ;
+}
+static int ctp_power_on(void)
+{
+
+      // config_boost_5v_gpio(1);
+        gpio_set_value(GPIO_CTP_POWER, 1);
+        ctp_vbus_ctrl(1);
+
+        gpio_set_value(GPIO_CTP_RESET, 1);
+        msleep(5);
+        gpio_set_value(GPIO_CTP_RESET, 0);
+        msleep(5);
+        gpio_set_value(GPIO_CTP_RESET, 1);
+
+        msleep(50);
+        return 1 ;
+}
+static int ctp_poweron_reset(void)
+{
+    gpio_set_value(GPIO_CTP_POWER, 0);
+    ctp_vbus_ctrl(0);
+    msleep(100);
+
+    //config_boost_5v_gpio(1);
+    gpio_set_value(GPIO_CTP_POWER, 1);
+    ctp_vbus_ctrl(1);
+     ctp_chip_reset();
+	
+    return 1 ;
+}
+
 #endif
 #if defined(CONFIG_TOUCHSCREEN_T1320) || defined(CONFIG_TOUCHSCREEN_T1320_MODULE)
 static struct t1320 t1320_pdata = {
@@ -1798,13 +1919,22 @@ static struct t1320 t1320_pdata = {
 	.hasF30 = false,
 	.enable = 0,
 	.init_platform_hw = ctp_init_platform_hw,
-	.exit_platform_hw = ctp_exit_platform_hw,	
+	.exit_platform_hw = ctp_exit_platform_hw,
+	.interrupts_pin_status = get_interrupts_status,
+	.chip_reset = ctp_chip_reset,
+	.chip_poweron_reset =ctp_poweron_reset,
+	.chip_poweron =ctp_power_on,
+	.chip_poweroff =ctp_power_off,	
 };
 #endif
 #if defined(CONFIG_TOUCHSCREEN_MXT224) || defined(CONFIG_TOUCHSCREEN_MXT224_MODULE)
 static struct mxt224_platform_data mxt224_pdata = {
 	.init_platform_hw = ctp_init_platform_hw,
 	.exit_platform_hw = ctp_exit_platform_hw,
+	/*.chip_reset = ctp_chip_reset,
+	.chip_poweron_reset =ctp_poweron_reset,
+	.chip_poweron =ctp_power_on,
+	.chip_poweroff =ctp_power_off,*/
 };
 #endif
 
@@ -2439,6 +2569,7 @@ static struct platform_device msm_camera_sensor_mt9t013 = {
 #endif
 #endif /*CONFIG_MSM_CAMERA*/
 
+#if !HUAWEI_HWID(S70)
 static u32 msm_calculate_batt_capacity(u32 current_voltage);
 
 static struct msm_psy_batt_pdata msm_psy_batt_data = {
@@ -2457,6 +2588,15 @@ static u32 msm_calculate_batt_capacity(u32 current_voltage)
 	return (current_voltage - low_voltage) * 100
 		/ (high_voltage - low_voltage);
 }
+#else
+static struct msm_psy_batt_pdata msm_psy_batt_data = {
+	.voltage_min_design 	= 3200,
+	.voltage_max_design	= 4200,
+	.avail_chg_sources   	= AC_CHG | USB_CHG ,
+	.batt_technology        = POWER_SUPPLY_TECHNOLOGY_LION,
+};
+
+#endif
 
 static struct platform_device msm_batt_device = {
 	.name 		    = "msm-battery",

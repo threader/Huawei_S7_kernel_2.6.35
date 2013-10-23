@@ -10,12 +10,12 @@
  *  it under the terms of the GNU General Public License version 2 as
  *  published by the Free Software Foundation.
  */
-#include <linux/slab.h>
+
 #include <linux/types.h> 
 #include <linux/i2c.h>    
 #include <linux/mxt224.h>
 #include "mxt224_generic.h"
-
+#include <linux/slab.h>
 #if 0
 #define DBG(fmt, args...) printk(KERN_INFO "[%s,%d] "fmt"\n", __FUNCTION__, __LINE__, ##args)
 #else
@@ -28,7 +28,10 @@
 #define OPTION_WRITE_CONFIG     /* uncomment to force chip setup at startup */
 
 static struct mxt224 *mxt224_generic_tsc;
-
+#ifdef CONFIG_DEBUG_MXT224_FIRMWARE 
+int ts_debug_X = 0 ;
+int ts_debug_Y = 0 ;
+#endif
 //General Object
 gen_powerconfig_t7_config_t power_config = {0};                 //Power config settings.
 gen_acquisitionconfig_t8_config_t acquisition_config = {0};     // Acquisition config. 
@@ -48,6 +51,7 @@ proci_twotouchgestureprocessor_t27_config_t twotouch_gesture_config = {0};  //Tw
 spt_gpiopwm_t19_config_t  gpiopwm_config = {0};             //GPIO/PWM config
 spt_selftest_t25_config_t selftest_config = {0};            //Selftest config.
 spt_cteconfig_t28_config_t cte_config = {0};                //Capacitive touch engine config.
+spt_userdata_t38_config_t userdata_config = {0};                //Capacitive touch engine config.
 spt_comcconfig_t18_config_t   comc_config = {0};            //Communication config settings.
 
 typedef struct
@@ -167,7 +171,7 @@ uint8_t address_slave(void)
 
 uint8_t init_touch_driver(uint8_t I2C_address, void (*handler)(uint8_t *, uint8_t))
 {
-    uint16_t i;
+    uint16_t i,j;
     uint8_t tmp;
     uint16_t current_address;
     uint16_t crc_address;
@@ -204,6 +208,7 @@ uint8_t init_touch_driver(uint8_t I2C_address, void (*handler)(uint8_t *, uint8_
     can also cause trouble. */
     current_address = OBJECT_TABLE_START_ADDRESS;
     max_report_id = 0;
+    min_multitouch_report_id = 0 ;
     for (i = 0; i < info_block->info_id.num_declared_objects; i++) {
         status = read_mem(current_address, 1, &info_block->objects[i].object_type);
         if (status != READ_MEM_OK) 
@@ -235,14 +240,23 @@ uint8_t init_touch_driver(uint8_t I2C_address, void (*handler)(uint8_t *, uint8_
         /* Find out the maximum message length. */
         if (info_block->objects[i].object_type == GEN_MESSAGEPROCESSOR_T5)
             max_message_length = info_block->objects[i].size + 1;
+	if(info_block->objects[i].object_type == TOUCH_MULTITOUCHSCREEN_T9){
+	     min_multitouch_report_id = max_report_id - info_block->objects[i].num_report_ids + 1 ;
+	     printk("min_multitouch_report_id = %d\n",min_multitouch_report_id) ;
+		 
+	}
 
-        DBG("T%d \tA%04x \tS%d \tI%d \tR%d", 
+        printk("T%02d A%04x S%02d I%02d R%02d: ", 
             info_block->objects[i].object_type, 
             info_block->objects[i].i2c_address, 
-            info_block->objects[i].size, 
+            info_block->objects[i].size+1, 
         	info_block->objects[i].instances,
             info_block->objects[i].num_report_ids);
-
+	for(j=0;j< info_block->objects[i].size+1;j++){
+		read_mem(info_block->objects[i].i2c_address+j, 1, &tmp);
+		printk("0x%02x ",tmp);
+	}
+	printk("\n");
 		{
 			unsigned char tempinfo[5] = {0};
 			 read_mem(info_block->objects[i].i2c_address, 5, tempinfo);
@@ -448,6 +462,7 @@ uint8_t write_multitouchscreen_config(uint8_t instance, touch_multitouchscreen_t
 {
     uint16_t object_address;
     uint8_t *tmp;
+	uint8_t *p_ret;
     uint8_t status;
     uint8_t object_size;
 
@@ -482,13 +497,26 @@ uint8_t write_multitouchscreen_config(uint8_t instance, touch_multitouchscreen_t
     *(tmp + 27) = cfg.xedgedist;
     *(tmp + 28) = cfg.yedgectrl;
     *(tmp + 29) = cfg.yedgedist;
+   *(tmp + 30) = cfg.jumplimit;
+   *(tmp + 31) = cfg.tchhyst;
 #endif
 
     object_address = get_object_address(TOUCH_MULTITOUCHSCREEN_T9, instance);
 
     if (object_address == 0)
         return CFG_WRITE_FAILED;
-    status = write_mem(object_address, object_size, tmp);
+
+	p_ret = tmp;
+	while(object_size > 0){
+		if(object_size > 30)
+    		status = write_mem(object_address, 30, p_ret);
+		else
+			status = write_mem(object_address, object_size, p_ret);
+		object_address += 30;
+		p_ret += 30;
+		object_size -= 30;
+	}
+
     free(tmp);
     return status;
 }
@@ -556,8 +584,47 @@ uint8_t write_gripsuppression_config(uint8_t instance, proci_gripfacesuppression
 
 uint8_t write_noisesuppression_config(uint8_t instance, procg_noisesuppression_t22_config_t cfg)
 {
-    return(write_simple_config(PROCG_NOISESUPPRESSION_T22, instance,
-        (void *)&cfg));
+    uint16_t object_address;
+    uint8_t *tmp;
+    uint8_t status;
+    uint8_t object_size;
+
+    object_size = get_object_size(PROCG_NOISESUPPRESSION_T22);
+    if (object_size == 0)
+        return CFG_WRITE_FAILED;
+
+    tmp = (uint8_t *)malloc(object_size);
+    if (tmp == NULL)
+        return CFG_WRITE_FAILED;
+
+    memset(tmp,0,object_size);
+
+    *(tmp + 0) = cfg.ctrl;
+    *(tmp + 1) = cfg.reserved;
+    *(tmp + 2) = cfg.reserved1;
+    *(tmp + 3) = (uint8_t)(cfg.gcaful & 0x00FF);
+    *(tmp + 4) = (uint8_t)(cfg.gcaful >> 8);
+    *(tmp + 5) = (uint8_t)(cfg.gcafll & 0x00FF);
+    *(tmp + 6) = (uint8_t)(cfg.gcafll >> 8);
+    *(tmp + 7) = cfg.actvgcafvalid;
+    *(tmp + 8) = cfg.noisethr;
+    *(tmp + 9) = cfg.reserved2;
+    *(tmp + 10) = cfg.freqhopscale;
+    *(tmp + 11) = cfg.freq[0];
+    *(tmp + 12) = cfg.freq[1];
+    *(tmp + 13) = cfg.freq[2];
+    *(tmp + 14) = cfg.freq[3];
+    *(tmp + 15) = cfg.freq[4];
+    *(tmp + 16) = cfg.idlegcafvalid;
+
+    object_address = get_object_address(PROCG_NOISESUPPRESSION_T22, instance);
+    if (object_address == 0)
+        return CFG_WRITE_FAILED;
+
+    status = write_mem(object_address, object_size, tmp);
+    free(tmp);
+
+    return status;
 }
 
 uint8_t write_proximity_config(uint8_t instance, touch_proximity_t23_config_t cfg)
@@ -585,14 +652,17 @@ uint8_t write_proximity_config(uint8_t instance, touch_proximity_t23_config_t cf
     *(tmp + 5) = cfg.reserved_for_future_aks_usage;
     *(tmp + 6) = cfg.blen;
 
-    *(tmp + 7) = (uint8_t)(cfg.tchthr & 0x00FF);
-    *(tmp + 8) = (uint8_t)(cfg.tchthr >> 8);
+    *(tmp + 7) = (uint8_t)(cfg.fxddthr & 0x00FF);
+    *(tmp + 8) = (uint8_t)(cfg.fxddthr >> 8);
 
-    *(tmp + 9) = cfg.tchdi;
+    *(tmp + 9) = cfg.fxddi;
     *(tmp + 10) = cfg.average;
 
-    *(tmp + 11) = (uint8_t)(cfg.rate & 0x00FF);
-    *(tmp + 12) = (uint8_t)(cfg.rate >> 8);
+    *(tmp + 11) = (uint8_t)(cfg.mvnullrate & 0x00FF);
+    *(tmp + 12) = (uint8_t)(cfg.mvnullrate >> 8);
+
+    *(tmp + 13) = (uint8_t)(cfg.mvdthr & 0x00FF);
+    *(tmp + 14) = (uint8_t)(cfg.mvdthr >> 8);
 
     object_address = get_object_address(TOUCH_PROXIMITY_T23, instance);
     if (object_address == 0)
@@ -750,6 +820,10 @@ uint8_t write_CTE_config(spt_cteconfig_t28_config_t cfg)
 {
 
     return write_simple_config(SPT_CTECONFIG_T28, 0, (void *)&cfg);
+}
+uint8_t write_USERDATA_config(spt_userdata_t38_config_t cfg)
+{
+    return write_simple_config(SPT_USERDATA_T38, 0, (void *)&cfg);
 }
 
 uint8_t write_simple_config(uint8_t object_type, uint8_t instance, void *cfg)
@@ -984,7 +1058,9 @@ void qt_Acquisition_Config_Init(void)
 
 #if defined(__VER_1_4__) || defined(__VER_1_5__) ||defined(__VER_2_0__)
     acquisition_config.atchcalst = 5;
-    acquisition_config.atchcalsthr = 10;
+    acquisition_config.atchcalsthr = 0;
+	acquisition_config.atchfrccalthr = 20;
+    acquisition_config.atchfrccalratio = 25;
 #endif
 
     if (write_acquisition_config(acquisition_config) != CFG_WRITE_OK)
@@ -1153,14 +1229,16 @@ void qt_Proximity_Config_Init(void)
 {
     proximity_config.ctrl = 0;
     proximity_config.xorigin = 0;
+    proximity_config.yorigin = 0;
     proximity_config.xsize = 0;
     proximity_config.ysize = 0;
     proximity_config.reserved_for_future_aks_usage = 0;
     proximity_config.blen = 0;
-    proximity_config.tchthr = 0;
-    proximity_config.tchdi = 0;
+    proximity_config.fxddthr = 0;
+    proximity_config.fxddi = 0;
     proximity_config.average = 0;
-    proximity_config.rate = 0;
+    proximity_config.mvnullrate = 0;
+    proximity_config.mvdthr = 0;
 
     if (get_object_address(TOUCH_PROXIMITY_T23, 0) != OBJECT_NOT_FOUND) {
         if (write_proximity_config(0, proximity_config) != CFG_WRITE_OK) {
@@ -1248,13 +1326,47 @@ void qt_CTE_Config_Init(void)
     cte_config.mode = 3;
     cte_config.idlegcafdepth = 8;
     cte_config.actvgcafdepth = 8;
-
+    cte_config.voltage = 60;
     /* Write CTE config to chip. */
     if (get_object_address(SPT_CTECONFIG_T28, 0) != OBJECT_NOT_FOUND) {
         if (write_CTE_config(cte_config) != CFG_WRITE_OK) {
             QT_printf("CTE configuration failed");
         }
     }
+} 
+
+void qt_UserData_Config_Init(void)
+{
+	uint16_t object_address;
+     	uint8_t object_size;
+	uint8_t data ;
+	uint8_t ret ;
+
+       /* Set USERDATA config */
+	userdata_config.data0 = 3;//firmware version: VERSION_OFFSET
+	/*touchscreen type*/
+	object_address = get_object_address(SPT_USERDATA_T38, 0) ;
+	object_size = get_object_size(SPT_USERDATA_T38);
+      if ((object_address == 0) ||(object_size == 0))
+        	return ;
+	ret = read_mem(object_address+USERDATA_TOUCHSCREEN_OFFSET, 1, &data);
+	if(READ_MEM_FAILED == ret)
+		return ;
+    userdata_config.data1 = data;//touchscreen type:TOUCHSCREEN_OFFSET
+	
+    userdata_config.data2 = 0;
+    userdata_config.data3 = 0;
+    userdata_config.data4 = 0;
+    userdata_config.data5 = 0;
+    userdata_config.data6 = 0;
+    userdata_config.data7 = 0;
+    /* Write USERDATA config to chip. */
+    if (get_object_address(SPT_USERDATA_T38, 0) != OBJECT_NOT_FOUND) {
+        if (write_USERDATA_config(userdata_config) != CFG_WRITE_OK) {
+            QT_printf("USERDATA configuration failed");
+        }
+    }
+	
 } 
 
 unsigned char Comm_Config_Process(unsigned char change_en)
@@ -1278,30 +1390,23 @@ unsigned char Comm_Config_Process(unsigned char change_en)
 
 uint8_t config_disable_mxt244(void)
 {
-    uint16_t object_address;
-    uint8_t data = 0u;
-    
- 	/*clear ENABLE bit of TOUCH_MULTITOUCHSCREEN_T9*/    
-    object_address = get_object_address(TOUCH_MULTITOUCHSCREEN_T9, 0);
-    if (object_address == 0)
-        return CFG_WRITE_FAILED;
-    return write_mem(object_address, 1, &data);
+    power_config.idleacqint = 0;
+    power_config.actvacqint = 0;
+    /* Write power config to chip. */
+   return  write_power_config(power_config) ;
 }
 uint8_t config_enable_mxt244(void)
 {
-    uint16_t object_address;
-    uint8_t data = 3u;
-
-    /*set ENABLE bit of TOUCH_MULTITOUCHSCREEN_T9*/
-    object_address = get_object_address(TOUCH_MULTITOUCHSCREEN_T9, 0);
-    if (object_address == 0)
-        return CFG_WRITE_FAILED;
-    return write_mem(object_address, 1, &data);
+   qt_Power_Config_Init();
+   return  CFG_WRITE_OK ;
 }
 
 void get_message(struct ts_event *tch)
 {
         uint8_t tmsg[9];
+	uint8_t  instance;
+      uint8_t object_type ;
+
         DBG("Enter get_message");
         if (read_mem(message_processor_address, max_message_length, tmsg) == READ_MEM_OK) {
             DBG(" read mem succeed!");
@@ -1310,14 +1415,27 @@ void get_message(struct ts_event *tch)
                 tmsg[4], tmsg[5], tmsg[6], tmsg[7], 
                 tmsg[8]);
             tch->touch_number_id=tmsg[0];
-            if (tmsg[0] > 1 && tmsg[0] < MAX_FINGERS+2) {
+	     object_type = report_id_to_type(tmsg[0],&instance) ;
+            if(TOUCH_MULTITOUCHSCREEN_T9 == object_type){
                 tch->tchstatus = tmsg[1];
                 tch->x = ((tmsg[2]) << 2) + ((tmsg[4] & 0xC0) >> 6);
                 tch->y = ((tmsg[3]) << 2) + ((tmsg[4] & 0x0C) >> 2);
                 tch->tcharea = tmsg[5];
                 tch->tchamp = tmsg[6];
                 tch->tchvector = tmsg[7];
-            } else if (tmsg[0] == 0xFF) {
+#ifdef CONFIG_DEBUG_MXT224_FIRMWARE 
+		ts_debug_X =tch->x ;
+		ts_debug_Y = tch->y ;
+#endif
+            }else if(GEN_COMMANDPROCESSOR_T6 == object_type){
+		    tp_config_err = ((0 == (tmsg[1] & 0x08)) ? 0 : 1) ; 
+	          tp_is_calibrating =  ((0 == (tmsg[1] & 0x10)) ? 0 : 1) ; 
+		  printk("%s: tmsg[1] =%d,tp_is_calibrating=%d\n",__func__,tmsg[1] ,tp_is_calibrating);
+}else if(PROCI_GRIPFACESUPPRESSION_T20 == object_type){
+	          tp_is_facesuppression =  ((0 == (tmsg[1] & 0x01)) ? 0 : 1) ; 
+		  printk("%s: tmsg[1] =%d,tp_is_facesuppression=%d\n",__func__,tmsg[1] ,tp_is_facesuppression);
+            
+}else if (tmsg[0] == 0xFF) {
     
             }
         }
@@ -1417,6 +1535,116 @@ uint8_t init_touch_app(void)
 
     return return_val;
 }
+
+#ifdef CONFIG_UPDATE_MXT224_FIRMWARE  
+int mxt224_update_firmware(void){
+        unsigned int  i;
+        printk("begin mxt224 Chip config...\n");
+	for(i=0;i<MAX_OBJECT_NUM;i++){
+		//qt_Power_Config_Init():  GEN_POWERCONFIG_T7
+		if(GEN_POWERCONFIG_T7 == config_data[i][0] ){
+			memcpy(&power_config,config_data[i]+2,sizeof(gen_powerconfig_t7_config_t));
+		    	if (write_power_config(power_config) != CFG_WRITE_OK){
+		        	QT_printf("Power configuration failed");
+				return WRITE_MEM_FAILED ;
+		    	}
+		}	
+		//qt_Acquisition_Config_Init(): GEN_ACQUISITIONCONFIG_T8
+		if(GEN_ACQUISITIONCONFIG_T8 == config_data[i][0] ){
+			memcpy(&acquisition_config,config_data[i]+2,sizeof(gen_acquisitionconfig_t8_config_t));
+		    	if (write_acquisition_config(acquisition_config) != CFG_WRITE_OK){
+        			QT_printf("Acquisition configuration failed");
+				return WRITE_MEM_FAILED ;
+		    	}
+		}	
+		//qt_Multitouchscreen_Init() :TOUCH_MULTITOUCHSCREEN_T9
+		if(TOUCH_MULTITOUCHSCREEN_T9 == config_data[i][0] ){
+			memcpy(&touchscreen_config,config_data[i]+2,sizeof(touch_multitouchscreen_t9_config_t));
+		    	if (write_multitouchscreen_config(0, touchscreen_config) != CFG_WRITE_OK){
+        			QT_printf("Multi touch configuration failed");	
+				return WRITE_MEM_FAILED ;
+		    	}
+		}		
+		//qt_KeyArray_Init();
+		if(TOUCH_KEYARRAY_T15 == config_data[i][0] ){
+			memcpy(&keyarray_config,config_data[i]+2,sizeof(touch_keyarray_t15_config_t));
+		    	if (write_keyarray_config(0, keyarray_config) != CFG_WRITE_OK) {
+        			QT_printf("Key array configuration failed");
+				return WRITE_MEM_FAILED ;
+		    	}
+		}		
+		//qt_ComcConfig_Init();
+		if(SPT_COMCONFIG_T18 == config_data[i][0] ){
+			memcpy(&comc_config,config_data[i]+2,sizeof(spt_comcconfig_t18_config_t));
+			if (get_object_address(SPT_COMCONFIG_T18, 0) != OBJECT_NOT_FOUND) {
+			        if (write_comc_config(0, comc_config) != CFG_WRITE_OK){
+			            QT_printf("Communication configuration failed");
+				     return WRITE_MEM_FAILED ;
+			        }
+    			}
+		}		
+		//qt_Gpio_Pwm_Init();
+		if(SPT_GPIOPWM_T19 == config_data[i][0] ){
+			memcpy(&gpiopwm_config,config_data[i]+2,sizeof(spt_gpiopwm_t19_config_t));
+			if (write_gpio_config(0, gpiopwm_config) != CFG_WRITE_OK) {
+			    QT_printf("GPIO PWM configuration failed");
+			    return WRITE_MEM_FAILED ;
+			}
+		}		
+		//qt_Grip_Face_Suppression_Config_Init():PROCI_GRIPFACESUPPRESSION_T20
+		if(PROCI_GRIPFACESUPPRESSION_T20 == config_data[i][0] ){
+			memcpy(&gripfacesuppression_config,config_data[i]+2,sizeof(proci_gripfacesuppression_t20_config_t));
+			 if (get_object_address(PROCI_GRIPFACESUPPRESSION_T20, 0) != OBJECT_NOT_FOUND) {
+			        if (write_gripsuppression_config(0, gripfacesuppression_config) != CFG_WRITE_OK) {
+			            QT_printf("Grip face suppression configuration failed");
+				     return WRITE_MEM_FAILED ;
+			        }
+    			}
+		}		
+		//qt_Noise_Suppression_Config_Init();
+		if(PROCG_NOISESUPPRESSION_T22 == config_data[i][0] ){
+			memcpy(&noise_suppression_config,config_data[i]+2,sizeof(procg_noisesuppression_t22_config_t));
+			  if (get_object_address(PROCG_NOISESUPPRESSION_T22, 0) != OBJECT_NOT_FOUND) {
+			        if (write_noisesuppression_config(0,noise_suppression_config) != CFG_WRITE_OK) {
+			            QT_printf("Noise suppression configuration failed");
+				     return WRITE_MEM_FAILED ;
+			        }
+			    }
+		}		
+		//qt_Proximity_Config_Init();		
+		if(TOUCH_PROXIMITY_T23 == config_data[i][0] ){
+			memcpy(&proximity_config,config_data[i]+2,sizeof(touch_proximity_t23_config_t));
+			if (get_object_address(TOUCH_PROXIMITY_T23, 0) != OBJECT_NOT_FOUND) {
+			        if (write_proximity_config(0, proximity_config) != CFG_WRITE_OK) {
+			            QT_printf("Proximity configuration failed");
+				     return WRITE_MEM_FAILED ;
+			        }
+			}
+		}
+		//qt_CTE_Config_Init();
+		if(SPT_CTECONFIG_T28 == config_data[i][0] ){
+			memcpy(&cte_config,config_data[i]+2,sizeof(spt_cteconfig_t28_config_t));
+		    if (get_object_address(SPT_CTECONFIG_T28, 0) != OBJECT_NOT_FOUND) {
+		        if (write_CTE_config(cte_config) != CFG_WRITE_OK) {
+		            QT_printf("CTE configuration failed");
+			     return WRITE_MEM_FAILED ;
+		        }
+		    }
+		}		
+		//qt_UserData_Config_Init();
+		if(SPT_USERDATA_T38 == config_data[i][0] ){
+			memcpy(&userdata_config,config_data[i]+2,sizeof(spt_userdata_t38_config_t));
+		     if (get_object_address(SPT_USERDATA_T38, 0) != OBJECT_NOT_FOUND) {
+			    if (write_USERDATA_config(userdata_config) != CFG_WRITE_OK) {
+			        QT_printf("USERDATA configuration failed");
+				 return WRITE_MEM_FAILED ;
+			    }
+			}
+		}
+	}
+     return WRITE_MEM_OK ;
+}
+#endif
 
 int mxt224_generic_probe(struct mxt224 *tsc)
 {
@@ -1526,6 +1754,8 @@ unsigned char read_diagnostic_delta(debug_diagnositc_t37_delta_t * dbg, unsigned
 {
     unsigned char status;
 
+	int i = 0;
+
     diagnostic_chip(QT_DELTA_MODE);
 
     diagnostic_addr = get_object_address(DEBUG_DIAGNOSTIC_T37, 0);
@@ -1593,7 +1823,10 @@ unsigned char read_diagnostic_delta(debug_diagnositc_t37_delta_t * dbg, unsigned
         delay_ms(1);
     }while(dbg->page != page);
 
-    status = read_mem(diagnostic_addr,diagnostic_size, &dbg->mode);
+
+    for (i = 2; i < diagnostic_size; i += I2C_SMBUS_BLOCK_MAX) {
+    	status = read_mem(diagnostic_addr+i, I2C_SMBUS_BLOCK_MAX, (&dbg->mode + i));
+	}
 
     return status;
 }

@@ -31,7 +31,7 @@
 #include <linux/freezer.h>
 #include <linux/akm8973.h>
 #include <linux/earlysuspend.h>
-#include <mach/akm8972_board.h>
+
 #ifdef CONFIG_ANDROID_POWER
 #include <linux/android_power.h>
 #endif
@@ -39,8 +39,11 @@
 
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
+
 #include "linux/hardware_self_adapt.h"
 #include <mach/msm_rpcrouter.h>
+
+//NOTICE: debug message open/off switch
 #define DEBUG 0
 #define MAX_FAILURE_COUNT 3
 
@@ -49,20 +52,18 @@ static int COMPASS_RST = 0;
 
 static struct i2c_client *this_client;
 
-
 extern struct input_dev *sensor_dev;
-
 
 struct akm8973_data {
 	struct input_dev *input_dev;
 	struct work_struct work;
 	struct early_suspend early_suspend;
 };
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void akm8973_early_suspend(struct early_suspend *h);
 static void akm8973_early_resume(struct early_suspend *h);
 #endif
-
 
 /* Addresses to scan -- protected by sense_data_mutex */
 static char sense_data[RBUFF_SIZE + 1];
@@ -75,8 +76,8 @@ static atomic_t data_ready;
 
 #ifdef CONFIG_UPDATE_COMPASS_FIRMWARE 
 static char AKECS_ETST=0;
-#define   AKECS_FACTORY_ETST       0xc7    
-#define   AKECS_RECOMPOSE_ETST  0xCC    
+#define   AKECS_FACTORY_ETST    0xc7     /*the value  is factory  defined the goog chip*/
+#define   AKECS_RECOMPOSE_ETST  0xCC    /* the value is recompose e2prom define value*/
 
 static ssize_t set_e2prom_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
 static ssize_t  set_e2prom_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
@@ -88,9 +89,7 @@ static struct kobj_attribute set_e2prom_attribute = {
 	.show = set_e2prom_show,
 	.store = set_e2prom_store,
 };
-
 #endif
-
 
 static atomic_t open_count;
 static atomic_t open_flag;
@@ -102,7 +101,6 @@ static atomic_t t_flag;
 static atomic_t mv_flag;
 
 static int failure_count = 0;
-
 static short akmd_delay = 0;
 
 #ifdef CONFIG_ANDROID_POWER
@@ -134,6 +132,7 @@ static int AKI2C_RxData(char *rxData, int length)
 		 },
 	};
 
+
 	for (loop_i = 0; loop_i < AKM8973_RETRY_COUNT; loop_i++) {
 		if (i2c_transfer(this_client->adapter, msgs, 2) > 0) {
 			break;
@@ -144,8 +143,8 @@ static int AKI2C_RxData(char *rxData, int length)
 	if (loop_i >= AKM8973_RETRY_COUNT) {
 		printk(KERN_ERR "%s retry over %d\n", __func__, AKM8973_RETRY_COUNT);
 		return -EIO;
-	}
-    
+	}  
+
 	return 0;
 }
 
@@ -176,13 +175,12 @@ static int AKI2C_TxData(char *txData, int length)
 }
 
 static void AKECS_Reset(void)
-{
-  gpio_set_value(COMPASS_RST, 1);
-  mdelay(10);
-	gpio_set_value(pdata->reset, 0);
+{ 
+    gpio_set_value_cansleep(pdata->reset, 1);
+    mdelay(10);
+	gpio_set_value_cansleep(pdata->reset, 0);
 	udelay(120);
-	gpio_set_value(pdata->reset, 1);
-
+	gpio_set_value_cansleep(pdata->reset, 1);
 }
 
 static int AKECS_StartMeasure(void)
@@ -256,6 +254,7 @@ static int AKECS_SetMode(char mode)
 {
 	int ret;
 
+
 	switch (mode) {
 	case AKECS_MODE_MEASURE:
 		ret = AKECS_StartMeasure();
@@ -325,9 +324,12 @@ static void AKECS_Report_Value(short *rbuf)
 		input_report_abs(data->input_dev, ABS_RZ, rbuf[2]);
 		input_report_abs(data->input_dev, ABS_RUDDER, rbuf[4]);
 	}
+
+ /* Report acceleration in gsensor and Delete in compass*/    
  #if 0
 	/* Report acceleration sensor information */
 	if (atomic_read(&a_flag)) {
+	  // NOTICE:  adds debug
 	  #if DEBUG
 	  printk("AKECS_Report_Value: Acceleration x = %d, y = %d, z = %d\n",
 		 rbuf[6], rbuf[7], rbuf[8]);
@@ -338,6 +340,7 @@ static void AKECS_Report_Value(short *rbuf)
 		input_report_abs(data->input_dev, ABS_WHEEL, rbuf[5]);
 	}
 #endif
+
 	/* Report temperature information */
 	if (atomic_read(&t_flag)) {
 		input_report_abs(data->input_dev, ABS_THROTTLE, rbuf[3]);
@@ -356,16 +359,12 @@ static int AKECS_GetOpenStatus(void)
 {
 	wait_event_interruptible(open_wq, (atomic_read(&open_flag) != 0));
 	return atomic_read(&open_flag);
-
 }
 
 static int AKECS_GetCloseStatus(void)
 {
 	wait_event_interruptible(open_wq, (atomic_read(&open_flag) <= 0));
 	return atomic_read(&open_flag);
-
-
-
 }
 
 static void AKECS_CloseDone(void)
@@ -382,7 +381,7 @@ static int akm_aot_open(struct inode *inode, struct file *file)
 	if (atomic_cmpxchg(&open_count, 0, 1) == 0) {
 		if (atomic_cmpxchg(&open_flag, 0, 1) == 0) {
 			atomic_set(&reserve_open_flag, 1);
-			//enable_irq(this_client->irq); 
+			enable_irq(this_client->irq);
 			wake_up(&open_wq);
 			ret = 0;
 		}
@@ -396,7 +395,7 @@ static int akm_aot_release(struct inode *inode, struct file *file)
 	atomic_set(&open_flag, 0);
 	atomic_set(&open_count, 0);
 	wake_up(&open_wq);
-	//disable_irq(this_client->irq); 
+	disable_irq(this_client->irq);
 	return 0;
 }
 
@@ -408,16 +407,16 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	short flag;
 
 	switch (cmd) {
-	case ECS_IOCTL_APP_SET_MFLAG:
-	case ECS_IOCTL_APP_SET_AFLAG:
-	case ECS_IOCTL_APP_SET_TFLAG:
-	case ECS_IOCTL_APP_SET_MVFLAG:
+	case ECS_IOCTL_APP_SET_MFLAG:     /*set open magnetic sensor  flag*/
+	case ECS_IOCTL_APP_SET_AFLAG:     /*set open acceleration sensor flag*/
+	case ECS_IOCTL_APP_SET_TFLAG:     /*set open temprature sensor flag*/
+	case ECS_IOCTL_APP_SET_MVFLAG:   /*set open move  sensor flag*/    
 		if (copy_from_user(&flag, argp, sizeof(flag)))
 			return -EFAULT;
 		if (flag < 0 || flag > 1)
 			return -EINVAL;
 		break;
-	case ECS_IOCTL_APP_SET_DELAY:
+	case ECS_IOCTL_APP_SET_DELAY:        
 		if (copy_from_user(&flag, argp, sizeof(flag)))
 			return -EFAULT;
 		break;
@@ -426,34 +425,34 @@ akm_aot_ioctl(struct inode *inode, struct file *file,
 	}
 
 	switch (cmd) {
-	case ECS_IOCTL_APP_SET_MFLAG: 
+	case ECS_IOCTL_APP_SET_MFLAG:         
 		atomic_set(&m_flag, flag);
 		break;
-	case ECS_IOCTL_APP_GET_MFLAG:
+	case ECS_IOCTL_APP_GET_MFLAG: /*get open magnetic sensor flag*/        
 		flag = atomic_read(&m_flag);
 		break;
-	case ECS_IOCTL_APP_SET_AFLAG:
+	case ECS_IOCTL_APP_SET_AFLAG:        
 		atomic_set(&a_flag, flag);
 		break;
-	case ECS_IOCTL_APP_GET_AFLAG:
+	case ECS_IOCTL_APP_GET_AFLAG:  /*get open acceleration sensor flag*/        
 		flag = atomic_read(&a_flag);
 		break;
-	case ECS_IOCTL_APP_SET_TFLAG:
+	case ECS_IOCTL_APP_SET_TFLAG:        
 		atomic_set(&t_flag, flag);
 		break;
-	case ECS_IOCTL_APP_GET_TFLAG:
-		flag = atomic_read(&t_flag);
+	case ECS_IOCTL_APP_GET_TFLAG:        
+		flag = atomic_read(&t_flag);/*get open tempature sensor flag*/
 		break;
-	case ECS_IOCTL_APP_SET_MVFLAG:
+	case ECS_IOCTL_APP_SET_MVFLAG:        
 		atomic_set(&mv_flag, flag);
 		break;
-	case ECS_IOCTL_APP_GET_MVFLAG:
+	case ECS_IOCTL_APP_GET_MVFLAG: /*get open move sensor flag*/        
 		flag = atomic_read(&mv_flag);
 		break;
-	case ECS_IOCTL_APP_SET_DELAY:
+	case ECS_IOCTL_APP_SET_DELAY:        
 		akmd_delay = flag;
 		break;
-	case ECS_IOCTL_APP_GET_DELAY:
+	case ECS_IOCTL_APP_GET_DELAY:        
 		flag = akmd_delay;
 		break;
 	default:
@@ -502,18 +501,20 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	short layouts[4][3][3];
 	int i, j, k;
 
-
 	switch (cmd) {
 	case ECS_IOCTL_READ:
 	case ECS_IOCTL_WRITE:
+        
 		if (copy_from_user(&rwbuf, argp, sizeof(rwbuf)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_SET_MODE:
+        
 		if (copy_from_user(&mode, argp, sizeof(mode)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_SET_YPR:
+        
 		if (copy_from_user(&value, argp, sizeof(value)))
 			return -EFAULT;
 		break;
@@ -523,9 +524,11 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 	switch (cmd) {
 	case ECS_IOCTL_RESET:
+        
 		AKECS_Reset();
 		break;
 	case ECS_IOCTL_READ:
+        
 		if (rwbuf[0] < 1)
 			return -EINVAL;
 		ret = AKI2C_RxData(&rwbuf[1], rwbuf[0]);
@@ -533,6 +536,7 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			return ret;
 		break;
 	case ECS_IOCTL_WRITE:
+        
 		if (rwbuf[0] < 2)
 			return -EINVAL;
 		ret = AKI2C_TxData(&rwbuf[1], rwbuf[0]);
@@ -540,31 +544,39 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			return ret;
 		break;
 	case ECS_IOCTL_SET_MODE:
+        
 		ret = AKECS_SetMode((char)mode);
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_GETDATA:
+        
 		ret = AKECS_TransRBuff(msg, RBUFF_SIZE);
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_SET_YPR:
+        
 		AKECS_Report_Value(value);
 		break;
 	case ECS_IOCTL_GET_OPEN_STATUS:
+        
 		status = AKECS_GetOpenStatus();
 		break;
 	case ECS_IOCTL_GET_CLOSE_STATUS:
+        
 		status = AKECS_GetCloseStatus();
 		break;
 	case ECS_IOCTL_GET_DELAY:
+        
 		delay = akmd_delay;
 		break;
 	case ECS_IOCTL_GET_PROJECT_NAME:
+        
 		strncpy(project_name, pdata->project_name, 64);
 		break;
 	case ECS_IOCTL_GET_MATRIX:
+        
 		for (i = 0; i < 4; i++)
 			for (j = 0; j < 3; j++)
 				for (k = 0; k < 3; k++) {
@@ -577,36 +589,42 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 	switch (cmd) {
 	case ECS_IOCTL_READ:
+        
 		if (copy_to_user(argp, &rwbuf, sizeof(rwbuf)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_GETDATA:
+        
 		if (copy_to_user(argp, &msg, sizeof(msg)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_GET_OPEN_STATUS:
+        
 		if (copy_to_user(argp, &status, sizeof(status)))
 			return -EFAULT;
 	case ECS_IOCTL_GET_CLOSE_STATUS:
+        
 		if (copy_to_user(argp, &status, sizeof(status)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_GET_DELAY:
+        
 		if (copy_to_user(argp, &delay, sizeof(delay)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_GET_PROJECT_NAME:
+        
 		if (copy_to_user(argp, project_name, sizeof(project_name)))
 			return -EFAULT;
 		break;
 	case ECS_IOCTL_GET_MATRIX:
+        
 		if (copy_to_user(argp, layouts, sizeof(layouts)))
 			return -EFAULT;
 		break;
 	default:
 		break;
 	}
-
 	return 0;
 }
 
@@ -614,44 +632,66 @@ static void akm_work_func(struct work_struct *work)
 {
 	if (AKECS_GetData() < 0)
 		printk(KERN_ERR "AKM8973 akm_work_func: Get data failed\n");
+	enable_irq(this_client->irq);
 }
 
 static int akm8973_gpio_setup(struct i2c_client *client)
 {
-  int ret = 0;
-  struct compass_platform_data  *pd;
-  pd = client->dev.platform_data;  
+	int rc;  
+    struct akm8973_platform_data  *pd;
+    pd = client->dev.platform_data;  
 
-  ret = gpio_request(pd->reset, "Compass RESET Enable");
-  if (ret) {
-    printk("***suchangyu**AKECS_Reset* :gpio_request failed.\n");
-    return -1;
-  }
+	rc = gpio_request(pd->irq, "akm8973_irq_gpio");
+	if (rc) {
+		pr_err("%s: unable to request irq gpio %d\n",
+			__func__, pd->irq);
+		goto error_irq_gpio;
+	}
 
-  ret = gpio_tlmm_config(GPIO_CFG(pd->reset, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_10MA), GPIO_CFG_ENABLE);
-  if(ret < 0) {
-    printk("***suchangyu**AKECS_Reset* : gpio_tlmm_config failed.\n");
+	rc = gpio_direction_input(pd->irq);
+	if (rc) {
+		pr_err("%s: unable to set direction for irq gpio %d\n",
+			__func__, pd->irq);
+		goto error_irq_gpio;
+	}
+
+	rc = gpio_request(pd->reset, "akm8973_reset_gpio");
+	if (rc) {
+		pr_err("%s: unable to request reset gpio %d\n",
+			__func__, pd->reset);
+		goto error_reset_gpio;
+	}
+
+	rc = gpio_direction_output(pd->reset,1);
+	if (rc) {
+		pr_err("%s: unable to set direction for reset gpio %d\n",
+			__func__, pd->reset);
+		goto error_reset_gpio;
+	}
+
+	return 0;
+
+error_reset_gpio:
     gpio_free(pd->reset);
-    //return -1;
-  }
-  else {
-    // successful
-    COMPASS_RST = pd->reset;
-  }
-  return ret;
+error_irq_gpio:
+	gpio_free(pd->irq);
+    
+    return -1;
 }
 
 static void akm8973_gpio_release(struct i2c_client *client)
 {
-  struct compass_platform_data  *pd;
-  pd = client->dev.platform_data;
-  gpio_free(pd->reset);
+    struct akm8973_platform_data  *pd;
+    pd = client->dev.platform_data;
+
+	gpio_free(pd->irq);
+    gpio_free(pd->reset);
 }
 
 static irqreturn_t akm8973_interrupt(int irq, void *dev_id)
 {
 	struct akm8973_data *data = dev_id;
-	//disable_irq_nosync(this_client->irq); 
+	disable_irq_nosync(this_client->irq);
 	schedule_work(&data->work);
 	return IRQ_HANDLED;
 }
@@ -669,7 +709,6 @@ static struct file_operations akm_aot_fops = {
 	.release = akm_aot_release,
 	.ioctl = akm_aot_ioctl,
 };
-
 
 static struct miscdevice akm_aot_device = {
 	.minor = MISC_DYNAMIC_MINOR,
@@ -780,8 +819,8 @@ bool get_akm8973_allow_operate_65023_ldo2_flag(void)
 int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct akm8973_data *akm;
-  struct kobject *kobj = NULL;
-  char buffer[2];
+    struct kobject *kobj = NULL;
+    char buffer[2];
 	int err = 0;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -802,16 +841,18 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
   err = akm8973_gpio_setup(client);
   if (err < 0)
     goto exit_check_functionality_failed;
+
 	akm = kzalloc(sizeof(struct akm8973_data), GFP_KERNEL);
 	if (!akm) {
 		err = -ENOMEM;
 		goto exit_alloc_data_failed;
 	}
 
-	//INIT_WORK(&akm->work, akm_work_func); // [Sean@2011-3-7]: change to polling mode
+	INIT_WORK(&akm->work, akm_work_func);
 	i2c_set_clientdata(client, akm);
 
 	pdata = client->dev.platform_data;
+    
 	if (pdata == NULL) {
 		printk(KERN_ERR"AKM8973 akm8973_probe: platform data is NULL\n");
 		goto exit_platform_data_null;
@@ -829,7 +870,7 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
   gAkm8973_state = 1;
 	akm->input_dev = sensor_dev;
-	if ((akm->input_dev == NULL)||((akm->input_dev->id.vendor != GS_ADIX345)&&(akm->input_dev->id.vendor != GS_ST35DE))) {   //NOTICE(suchangyu): we only accept already known input device
+	if ((akm->input_dev == NULL)||((akm->input_dev->id.vendor != GS_ADIX345)&&(akm->input_dev->id.vendor != GS_ST35DE))) {   //NOTICE(): we only accept already known input device
 	  err = -ENOMEM;
 	  printk(KERN_ERR "akm8973_probe: Failed to allocate input device\n");
 	  goto exit_input_dev_alloc_failed;
@@ -842,8 +883,6 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto exit_set_mode_failed;
 	}
 
-	/*
-	// [Sean@2011-3-7]: change to polling mode
 	err = request_irq(client->irq, akm8973_interrupt, IRQF_TRIGGER_HIGH,
 			  "akm8973", akm);
 	disable_irq(this_client->irq);
@@ -852,8 +891,7 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		printk(KERN_ERR"AKM8973 akm8973_probe: request irq failed\n");
 		goto exit_irq_request_failed;
 	}
-	*/
-	
+
 	set_bit(EV_ABS, akm->input_dev->evbit);
 	/* yaw */
 	input_set_abs_params(akm->input_dev, ABS_RX, 0, 23040, 0 ,0); //0, 360, 0, 0); //[Sean@2011-03-07] why ?
@@ -957,7 +995,7 @@ exit_check_functionality_failed:
 	return err;
 }
 
-static int akm8973_detect(struct i2c_client *client, int kind,
+static int akm8973_detect(struct i2c_client *client,
 			  struct i2c_board_info *info)
 {
 #if DEBUG
@@ -983,7 +1021,7 @@ static int akm8973_suspend(struct i2c_client *client, pm_message_t mesg)
 #if DEBUG
 	printk(KERN_ERR "AK8973 compass driver: akm8973_suspend\n");
 #endif
-	//disable_irq(client->irq); // [Sean@2011-3-7]: change to polling mode
+	disable_irq(client->irq);
 	ret = AKECS_SetMode(AKECS_MODE_POWERDOWN);
 	if (ret < 0)
 			printk(KERN_ERR "akm8973_suspend power off failed\n");
@@ -1005,18 +1043,17 @@ static int akm8973_resume(struct i2c_client *client)
 	ret = AKECS_SetMode(AKECS_MODE_MEASURE);
 	if (ret < 0)
 			printk(KERN_ERR "akm8973_resume power measure failed\n");
-	//enable_irq(client->irq); // [Sean@2011-3-7]: Change to polling mode
+	enable_irq(client->irq);
 	atomic_set(&open_flag, atomic_read(&reserve_open_flag));
 	wake_up(&open_wq);
 
 	return 0;
 }
 
-
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void akm8973_early_suspend(struct early_suspend *h)
 {
-      struct akm8973_data *akm ;
+    struct akm8973_data *akm ;
 	akm = container_of(h, struct akm8973_data, early_suspend);
 	
 	akm8973_suspend(this_client, PMSG_SUSPEND);
@@ -1036,7 +1073,7 @@ static void akm8973_early_resume(struct early_suspend *h)
 static int AKECS_StartE2PWrite(void)
 {
 	char buffer[2];
-       buffer[0] = AKECS_REG_MS1;
+    buffer[0] = AKECS_REG_MS1;
 	buffer[1] = 0xAA;    /*write e2prom */
 	return AKI2C_TxData(buffer, 2);
 }
@@ -1053,14 +1090,17 @@ static  int AKECS_WriteE2PReg( void )
 		printk(KERN_ERR "AKECS_WriteE2PReg: transfer error\n");
 		return -EIO;
 	}
+    
 	msleep(10);
 	tx_buffer[0] = AKECS_REG_EVIR;
 	tx_buffer[1] =0x77;   /*akm factory support value*/
 	ret= AKI2C_TxData(tx_buffer, 2);
+    
 	if(ret < 0) {
 		printk(KERN_ERR "AKECS_WriteE2PReg: transfer error\n");
 		return -EIO;
 	}
+    
 	msleep(10);
 	tx_buffer[0] = AKECS_REG_EIHE;
 	tx_buffer[1] =0x66;   /*akm factory support value*/
@@ -1103,12 +1143,15 @@ static  int AKECS_ReadE2PReg( void )
 	char rx_buffer[6];
 	rx_buffer[0] = AKECS_REG_ETS;
 	ret= AKI2C_RxData(rx_buffer, 5);
+    
 	if(ret < 0) {
 		printk(KERN_ERR "AKECS_ReadE2PReg: transfer error\n");
 		return -EIO;
 	}
-	rx_buffer[0] = AKECS_REG_EHXGA;
+
+    rx_buffer[0] = AKECS_REG_EHXGA;
 	ret= AKI2C_RxData(rx_buffer, 4);
+    
 	if(ret < 0) {
 		printk(KERN_ERR "AKECS_ReadE2PReg: transfer error\n");
 		return -EIO;
@@ -1232,3 +1275,4 @@ module_exit(akm8973_exit);
 MODULE_AUTHOR("viral wang <viral_wang@htc.com>");
 MODULE_DESCRIPTION("AKM8973 compass driver");
 MODULE_LICENSE("GPL");
+

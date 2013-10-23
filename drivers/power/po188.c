@@ -25,7 +25,7 @@
 #include <linux/workqueue.h>
 #include <asm/atomic.h>
 #include <mach/msm_rpcrouter.h>
-#include<linux/delay.h>
+#include <linux/delay.h>
 #include <asm/atomic.h>
 #include <linux/timer.h>
 #include <linux/hwmon-sysfs.h>
@@ -41,6 +41,8 @@
 #include <linux/kobject.h>
 #include <linux/input.h>
 #include <linux/earlysuspend.h>
+
+#include <linux/msm_adc.h>
 
 /* Macro definition */
 #define PO188DE_DRIVER_NAME "po188"
@@ -64,7 +66,10 @@
 #define TIMES    3
 
 // IOCTL Command
-#define PO188_IOC_MAGIC 'D'
+#define PO188_IOC_MAGIC 'l'
+//#define PO188_IOC_MAGIC 'D'
+#define LIGHTSENSOR_IOCTL_GET_ENABLED _IOR(PO188_IOC_MAGIC, 1, int *)
+#define LIGHTSENSOR_IOCTL_ENABLE _IOW(PO188_IOC_MAGIC, 2, int *)
 #define IOCTL_SEND _IO(PO188_IOC_MAGIC, 0) 
 #define IOCTL_RESET_PO188 _IO(PO188_IOC_MAGIC, 1)
 #define IOCTL_CLOSE_PO188 _IO(PO188_IOC_MAGIC, 2)
@@ -129,7 +134,7 @@ static void po188_wait_for_event(struct work_struct *work);
 static DECLARE_WORK(po188_cb_work, po188_wait_for_event);
 
 /* G-sensor & Light share input dev. suchangyu. 20100513. begin. */
-struct input_dev *sensor_dev = NULL;
+extern struct input_dev *sensor_dev;
 /* G-sensor & Light share input dev. suchangyu. 20100513. end. */
 
 
@@ -145,8 +150,8 @@ static ssize_t po188_attr_show(struct kobject *kobj, struct kobj_attribute *attr
 
 
 /* Define the device attributes */
- static struct kobj_attribute po188_attribute =
-         __ATTR(light, 0666, po188_attr_show, NULL);
+static struct kobj_attribute po188_attribute =
+     __ATTR(light, 0644, po188_attr_show, NULL);
 
  static struct attribute* po188_attributes[] =
  {
@@ -177,7 +182,8 @@ po188_release(struct inode* i, struct file* f)
 static inline int
 po188_get_fsr(s32 fsr)
 {
-
+    return fsr;
+	
 	// modify the value	
 	if(fsr <=3)
 		return 75;
@@ -295,7 +301,7 @@ po188_wait_for_event(struct work_struct *work)
 	//static bool autodect=0;	
 	int k;
 	int sum=0;
-    mod_timer(&po188_driver.timer, jiffies + MOD_SENSOR_POLLING_JIFFIES);
+    mod_timer(&po188_driver.timer, jiffies + SENSOR_POLLING_JIFFIES);
     po188_get_sensor_status();
 	po188_driver.voltage_now = po188_get_fsr(po188_driver.voltage_now);
 	voltage[i++%TIMES]=po188_driver.voltage_now;
@@ -324,8 +330,9 @@ po188_wait_for_event(struct work_struct *work)
      */
 	if( (po188_driver.last_voltage - po188_driver.current_voltage >= 60) ||
         (po188_driver.current_voltage - po188_driver.last_voltage >= 60) )
-	{		
-	    input_report_rel(po188_driver.input_dev, REL_LIGHT,  po188_driver.voltage_now);			
+	{
+	
+	    input_report_abs(po188_driver.input_dev, ABS_MISC,  po188_driver.voltage_now);			
 		input_sync(po188_driver.input_dev);
 		/*status++;
 		if(status == TIMES)
@@ -338,14 +345,17 @@ po188_wait_for_event(struct work_struct *work)
 			autodect = 1;
 		}*/
         po188_driver.last_voltage = po188_driver.voltage_now;
+        PO188_DMSG(" *************inner we can report light info to HAL (%d)\n", po188_driver.voltage_now);
 	}
 	if( po188_driver.vol_flag == true )
 	{
 		//input_report_rel(po188_driver.input_dev, REL_LIGHT,  10);			
 		//input_sync(po188_driver.input_dev);
-        input_report_rel(po188_driver.input_dev, REL_LIGHT,  po188_driver.voltage_now);			
+        input_report_abs(po188_driver.input_dev, ABS_MISC,  po188_driver.voltage_now);			
 		input_sync(po188_driver.input_dev);
-		//po188_driver.vol_flag = false; 
+
+        //po188_driver.vol_flag = false; 
+        
         po188_driver.last_voltage = po188_driver.voltage_now;
 	}
 	//po188_driver.last_voltage = po188_driver.current_voltage;
@@ -384,6 +394,7 @@ po188_ioctl(struct inode* inode, struct file* file, unsigned int cmd,
 			destroy_workqueue(po188_driver.po188_wq);
 			break;
 
+        case LIGHTSENSOR_IOCTL_ENABLE:
 		case SENSORS_GET_LUX_FIR:
 	
 			if(1 == param)
@@ -391,6 +402,8 @@ po188_ioctl(struct inode* inode, struct file* file, unsigned int cmd,
                 /*
                  *for Auto adjust the brightness of the screen when the S7 start
                  */
+
+				PO188_DMSG(" ************* active enable,	close_finished_flag =  1\n");
                 po188_driver.status_on = true;
 				po188_driver.vol_flag = true;
                 if (start_flag)
@@ -404,6 +417,7 @@ po188_ioctl(struct inode* inode, struct file* file, unsigned int cmd,
 			}
 			if( 0==param )
 			{	
+				PO188_DMSG(" ************* active disable close_finished_flag =  0\n");
 				del_timer(&po188_driver.timer);		
 				po188_driver.status_on = false;
                 po188_driver.vol_flag = false;
@@ -435,6 +449,11 @@ po188_ioctl(struct inode* inode, struct file* file, unsigned int cmd,
 
 			up(&po188_driver.run_sem);
 			break;
+
+        case LIGHTSENSOR_IOCTL_GET_ENABLED:
+            put_user(1, (unsigned long __user *)param);
+            break;
+            
 		default:
 			printk("%s CMD INVALID.\n", __FUNCTION__);
 			ret = -EINVAL;
@@ -449,7 +468,7 @@ po188_ioctl(struct inode* inode, struct file* file, unsigned int cmd,
 }
 
 
-static void Po188_suspend()
+static void Po188_suspend(struct early_suspend *h)
 {
     if( po188_driver.status_on )
 	{
@@ -458,7 +477,7 @@ static void Po188_suspend()
     }
 }
 
-static void Po188_resume()
+static void Po188_resume(struct early_suspend *h)
 {
 	if( po188_driver.status_on )
 	{
@@ -544,6 +563,7 @@ po188_init(void)
 	
 	if (!po188_driver.po188_wq) 
 	{
+		printk(KERN_ERR "***********************%s: create workque failed \n", __func__);
 		return -ENOMEM;
 	}	
 	init_timer(&po188_driver.timer);
@@ -572,8 +592,8 @@ po188_init(void)
   } else {
     po188_driver.input_dev = sensor_dev;
   }
-  set_bit(EV_REL,po188_driver.input_dev->evbit);
-  set_bit(REL_LIGHT, po188_driver.input_dev->relbit);
+  set_bit(EV_ABS,po188_driver.input_dev->evbit);
+  set_bit(ABS_MISC, po188_driver.input_dev->absbit);
   set_bit(EV_SYN,po188_driver.input_dev->evbit);
 
   po188_driver.early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
@@ -606,7 +626,7 @@ po188_exit (void)
 
 	sysfs_remove_group(&po188_driver.dev.parent->kobj, 
 		&po188_defattr_group);
-	input_unregister_device(&po188_driver.input_dev);
+	input_unregister_device(po188_driver.input_dev);
 	misc_deregister(&po188_driver.dev);
 }
 

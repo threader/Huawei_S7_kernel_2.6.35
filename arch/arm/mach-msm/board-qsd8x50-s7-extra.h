@@ -1,5 +1,3 @@
-
-
 #if defined(CONFIG_MOUSE_OFN_HID) || defined(CONFIG_MOUSE_OFN_HID_MODULE)
 #include <mach/ofn_hid.h> 
 #endif
@@ -123,7 +121,7 @@
 #endif
 
 #if defined(CONFIG_GPIO_I2C_ADPT)
-#define GPIO_I2C_SCL		98		
+#define GPIO_I2C_SCL		98
 #define GPIO_I2C_SDA		100
 #endif
 #endif

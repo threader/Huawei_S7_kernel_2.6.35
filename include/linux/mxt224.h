@@ -50,7 +50,28 @@ extern void mxt224_get_message(struct mxt224 *tsc);
 extern void mxt224_update_pen_state(void *tsc);
 extern uint8_t config_disable_mxt244(void);
 extern uint8_t config_enable_mxt244(void);
-
+#ifdef CONFIG_UPDATE_MXT224_FIRMWARE  
+extern int mxt224_update_firmware(void);
+#define MAX_OBJECT_NUM						15
+#define MAX_OBJECT_CONFIGDATA_NUM		50
+extern unsigned char config_data[MAX_OBJECT_NUM][MAX_OBJECT_CONFIGDATA_NUM];
+#endif
+extern uint8_t backup_config(void);
+extern uint8_t reset_chip(void);
+extern uint8_t get_object_size(uint8_t object_type);
+extern uint16_t get_object_address(uint8_t object_type, uint8_t instance);
+extern uint8_t calibrate_chip(void) ;
+ extern uint8_t write_mem(uint16_t Address, uint8_t ByteCount, uint8_t *Data);
+ extern uint8_t read_mem(uint16_t Address, uint8_t ByteCount, uint8_t *Data);
+ extern  uint8_t report_id_to_type(uint8_t report_id, uint8_t *instance);
+#ifdef CONFIG_DEBUG_MXT224_FIRMWARE 
+extern int ts_debug_X ;
+extern int ts_debug_Y ;
+extern int min_multitouch_report_id ;
+#endif
+extern int tp_is_calibrating   ;
+extern int tp_is_facesuppression   ;
+extern int tp_config_err;
 struct mxt224_platform_data {
 	u16	model;				/* 2007. */
 	u16	x_plate_ohms;
@@ -60,6 +81,22 @@ struct mxt224_platform_data {
 						   interrupt source */
 	int	(*init_platform_hw)(void);
 	void	(*exit_platform_hw)(void);
+	int	(*interrupts_pin_status)(void);
+	int	(*chip_reset)(void);
+	int	(*chip_poweron_reset)(void);
+	int	(*chip_poweroff)(void);
+	int (*config_tp_5v)(int enable);
 };
 
+#ifdef CONFIG_UPDATE_MXT224_FIRMWARE 
+#define firmware_attr(_name) \
+static struct kobj_attribute _name##_attr = {	\
+	.attr	= {				\
+		.name = __stringify(_name),	\
+		.mode = 0664,			\
+	},					\
+	.show	= _name##_show,			\
+	.store	= _name##_store,		\
+}
+#endif
 #endif

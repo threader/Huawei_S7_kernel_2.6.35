@@ -108,6 +108,23 @@ struct t1320_function_descriptor {
 #define TOUCH_LCD_X_MAX	3128
 #define TOUCH_LCD_Y_MAX	1758
 
+/*virtual key boundarys*/
+#define CTP_HOME_X		3340
+#define CTP_HOME_Y		382
+#define CTP_MENU_X		3340
+#define CTP_MENU_Y		915
+#define CTP_BACK_X		3340
+#define CTP_BACK_Y		1434
+#define KEYPAD_DIAMETER				200
+#define KEYPAD_AREA(x, y, KEYNAME) 	((x >= CTP_##KEYNAME##_X - KEYPAD_DIAMETER / 2) \
+									 && (x <= CTP_##KEYNAME##_X + KEYPAD_DIAMETER / 2) \
+								     && (y >= CTP_##KEYNAME##_Y - KEYPAD_DIAMETER / 2) \
+        	                         && (y <= CTP_##KEYNAME##_Y + KEYPAD_DIAMETER / 2))
+
+#define TOUCH_HOME		(1 << 0)
+#define TOUCH_MENU		(1 << 1)
+#define TOUCH_BACK		(1 << 2)
+#define TOUCH_PEN		(1 << 3)
 
 /* end: added by huangzhikui for scaling axis 2010/12/25 */
 

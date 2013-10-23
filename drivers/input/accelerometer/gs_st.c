@@ -5,7 +5,6 @@
  * 
  *
  */
-#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/earlysuspend.h>
@@ -24,6 +23,8 @@
 
 #include <linux/gs_st.h>
 #include "linux/hardware_self_adapt.h"
+#include <linux/slab.h>
+#include <mach/board.h>
 
 
 #define GS_SENSOR_HW_T3  1
@@ -31,8 +32,7 @@
 #define GS_POLLING   1
 
 static struct workqueue_struct *gs_wq;
-
-extern struct input_dev *sensor_dev;
+struct input_dev *sensor_dev = NULL;
 
 
 #ifdef GS_SENSOR_HW_T3
@@ -57,11 +57,7 @@ struct gs_data {
 	struct i2c_client *client;
 	struct input_dev *input_dev;
 	int use_irq;
-	
-	
 	struct mutex  mlock;
-	
-	
 	struct hrtimer timer;
 	struct work_struct  work;	
 	uint32_t flags;
@@ -69,15 +65,9 @@ struct gs_data {
 	struct early_suspend early_suspend;
 };
 
-
 static struct gs_data  *this_gs_data;
-
-
 static int accel_delay = GS_ST_TIMRER;     /*1s*/
-
-
 static atomic_t a_flag;
-
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void gs_early_suspend(struct early_suspend *h);
 static void gs_late_resume(struct early_suspend *h);
@@ -90,11 +80,9 @@ static inline int reg_read(struct gs_data *gs , int reg)
 	int val;
 
 	mutex_lock(&gs->mlock);
-
 	val = i2c_smbus_read_byte_data(gs->client, reg);
 	if (val < 0)
 		printk(KERN_ERR "i2c_smbus_read_byte_data failed\n");
-
 	mutex_unlock(&gs->mlock);
 
 	return val;
@@ -122,9 +110,7 @@ static inline int reg_write(struct gs_data *gs, int reg, uint8_t val)
 #define MG_PER_SAMPLE   720                       /*HAL: 720=1g*/                       
 #define FILTER_SAMPLE_NUMBER  256           /*256LSB =1g*/  
 
-
 static int sensor_data[4];
-
 int gs_st_data_to_compass(int accel_data [3])
 {
 	memset(accel_data, 0, 3 );
@@ -138,13 +124,13 @@ int gs_st_data_to_compass(int accel_data [3])
 /**************************************************************************************/
 
 static int gs_st_open(struct inode *inode, struct file *file)
-{			
-       reg_read(this_gs_data, GS_ST_REG_STATUS ); /* read status */
-	
+{
+
+    reg_read(this_gs_data, GS_ST_REG_STATUS ); /* read status */
 	reg_write(this_gs_data, GS_ST_REG_CTRL1, GS_ST_CTRL1_PD|
-								          GS_ST_CTRL1_Zen|
-		                                                  GS_ST_CTRL1_Yen|
-		                                                  GS_ST_CTRL1_Xen); 
+								          	 GS_ST_CTRL1_Zen|
+		                                     GS_ST_CTRL1_Yen|
+		                                     GS_ST_CTRL1_Xen); 
 	
 	reg_write(this_gs_data, GS_ST_REG_CTRL3, GS_INTMODE_DATA_READY); 
 	reg_read(this_gs_data, GS_ST_REG_OUT_X ); /* read X */
@@ -153,10 +139,9 @@ static int gs_st_open(struct inode *inode, struct file *file)
 
 	if (this_gs_data->use_irq)
 		enable_irq(this_gs_data->client->irq);
-	else
-		 hrtimer_start(&this_gs_data->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
-	
-		
+	else {
+		hrtimer_start(&this_gs_data->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
+	}
 	return nonseekable_open(inode, file);
 }
 
@@ -169,13 +154,10 @@ static int gs_st_release(struct inode *inode, struct file *file)
 		disable_irq(this_gs_data->client->irq);
 	else
 		hrtimer_cancel(&this_gs_data->timer);
-	
-	
-	   accel_delay = GS_ST_TIMRER;	  
-	
 
-	
-		return 0;
+        accel_delay = GS_ST_TIMRER;	  
+
+	    return 0;
 }
 
 static int
@@ -191,7 +173,6 @@ gs_st_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 	switch (cmd) 
 	{
-
 		case ECS_IOCTL_APP_SET_AFLAG:     /*set open acceleration sensor flag*/
 			if (copy_from_user(&flag, argp, sizeof(flag)))
 				return -EFAULT;
@@ -213,12 +194,10 @@ gs_st_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			flag = atomic_read(&a_flag);
 			break;
 		case ECS_IOCTL_APP_SET_DELAY:
-			
 			if(flag)
 				accel_delay = flag;
 			else
 				accel_delay = 10;   /*10ms*/
-			
 			break;
 			
 		case ECS_IOCTL_APP_GET_DELAY:
@@ -237,19 +216,18 @@ gs_st_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		case ECS_IOCTL_APP_GET_AFLAG:
 			if (copy_to_user(argp, &flag, sizeof(flag)))
 				return -EFAULT;
-			
 			break;
 
 		case ECS_IOCTL_APP_GET_DELAY:
 			if (copy_to_user(argp, &flag, sizeof(flag)))
 			return -EFAULT;
-			
 			break;
 			
 		case ECS_IOCTL_READ_ACCEL_XYZ:
 			if (copy_to_user(argp, &accel_buf, sizeof(accel_buf)))
 				return -EFAULT;
 			break;
+            
 		default:
 			break;
 	}
@@ -280,10 +258,9 @@ static void gs_work_func(struct work_struct *work)
 	int	sesc = accel_delay/1000;
 	int nsesc = (accel_delay%1000)*1000000;
 
-       
-	 status = reg_read(gs, GS_ST_REG_STATUS ); /* read status */
-	if (status & (1<<3))
-	{
+    status = reg_read(gs, GS_ST_REG_STATUS ); /* read status */
+
+	if (status & (1<<3)) {
         u8 u8x = reg_read(gs,GS_ST_REG_OUT_X);
         u8 u8y =  reg_read(gs,GS_ST_REG_OUT_Y);	
         u8 u8z = reg_read(gs,GS_ST_REG_OUT_Z);
@@ -296,27 +273,27 @@ static void gs_work_func(struct work_struct *work)
 		y = MG_PER_SAMPLE * (s8)u8x ;			
 		z = MG_PER_SAMPLE * (s8)u8z;
 #endif	
-		if(u8x&0x80)/*¸ºÖµ*/
+		if(u8x & 0x80)/*¸ºÖµ*/
 		{
-			x= u8x-256; 		/*¸ºÊý°´ÕÕ²¹Âë¼ÆËã */  
+			x= u8x - 256; 		/*¸ºÊý°´ÕÕ²¹Âë¼ÆËã */  
 		}
 		else
 		{
 			x = u8x;
 		}
 					
-		if(u8y&0x80)/*¸ºÖµ*/
+		if(u8y & 0x80)/*¸ºÖµ*/
 		{
-			 y=u8y-256; 		/*¸ºÊý°´ÕÕ²¹Âë¼ÆËã */  	 
+			 y  =u8y - 256; 		/*¸ºÊý°´ÕÕ²¹Âë¼ÆËã */  	 
 		}
 		else
 		{
 			y = u8y;
 		}
 				
-		if(u8z&0x80)/*¸ºÖµ*/
+		if(u8z & 0x80)/*¸ºÖµ*/
 		{
-			 z=u8z-256; 		/*¸ºÊý°´ÕÕ²¹Âë¼ÆËã */   
+			 z = u8z - 256; 		/*¸ºÊý°´ÕÕ²¹Âë¼ÆËã */   
 		}
 		else
 		{
@@ -364,13 +341,13 @@ static void gs_work_func(struct work_struct *work)
 		input_sync(gs->input_dev);
 
 	}
-	if (gs->use_irq)
+    
+	if (gs->use_irq) {
 		enable_irq(gs->client->irq);
-	else
+	} else {
 		hrtimer_start(&gs->timer, ktime_set(sesc, nsesc), HRTIMER_MODE_REL);
-
+    }
 }
-
 
 static enum hrtimer_restart gs_timer_func(struct hrtimer *timer)
 {
@@ -381,7 +358,6 @@ static enum hrtimer_restart gs_timer_func(struct hrtimer *timer)
 }
 
 #ifndef   GS_POLLING 	
-
 static irqreturn_t gs_irq_handler(int irq, void *dev_id)
 {
 	struct gs_data *gs = dev_id;
@@ -392,34 +368,37 @@ static irqreturn_t gs_irq_handler(int irq, void *dev_id)
 
 static int gs_config_int_pin(void)
 {
-	int err;
+	int rc;  
 
-     err = gpio_request(GPIO_INT1, "gpio_gs_int");
+	rc = gpio_request(GPIO_INT1, "lis35de_irq_gpio");
+	if (rc) {
+		pr_err("%s: unable to request gpio %d\n",
+			__func__, GPIO_INT1);
+		goto error_irq_gpio;
+	}
 
-     if (err) 
-     {
-		printk(KERN_ERR "gpio_request failed for st gs int\n");
-		return -1;
-	}	
-     
-     err = gpio_configure(GPIO_INT1, GPIOF_INPUT | IRQF_TRIGGER_HIGH);
-     if (err) 
-     	{
-     		gpio_free(GPIO_INT1);
-		printk(KERN_ERR "gpio_config failed for gs int HIGH\n");
-	       return -1;
-	}     
+	rc = gpio_direction_input(GPIO_INT1);
+	if (rc) {
+		pr_err("%s: unable to set direction for gpio %d\n",
+			__func__, GPIO_INT1);
+		goto error_irq_gpio;
+	}
 
 	return 0;
+    
+error_irq_gpio:
+	gpio_free(GPIO_INT1);
+    return -1;
+
 }
 
 static void gs_free_int(void)
 {
-
 	gpio_free(GPIO_INT1);
 
 }
 #endif
+
 static int gs_probe(
 	struct i2c_client *client, const struct i2c_device_id *id)
 {	
@@ -434,10 +413,10 @@ static int gs_probe(
 		ret = -ENODEV;
 		goto err_check_functionality_failed;
 	}
+    
 #ifndef GS_POLLING 	
 	ret = gs_config_int_pin();
-	if(ret <0)
-	{
+	if(ret <0) {
 		goto err_check_functionality_failed;
 	}
 #endif
@@ -447,6 +426,7 @@ static int gs_probe(
 		ret = -ENOMEM;
 		goto err_alloc_data_failed;
 	}
+
 	mutex_init(&gs->mlock);
 
 	INIT_WORK(&gs->work, gs_work_func);
@@ -484,27 +464,26 @@ static int gs_probe(
 
 	
 	if (sensor_dev == NULL) {
-	gs->input_dev = input_allocate_device();
-	if (gs->input_dev == NULL) {
-		ret = -ENOMEM;
-		printk(KERN_ERR "gs_probe: Failed to allocate input device\n");
-		goto err_input_dev_alloc_failed;
-	}
-	  gs->input_dev->name = "sensors"; //"gsensor";
+		gs->input_dev = input_allocate_device();
+        
+		if (gs->input_dev == NULL) {
+			ret = -ENOMEM;
+			printk(KERN_ERR "gs_probe: Failed to allocate input device\n");
+			goto err_input_dev_alloc_failed;
+		}
+
+	  gs->input_dev->name = "sensors"; 
 	  sensor_dev = gs->input_dev;
 	} else {
 	  gs->input_dev = sensor_dev;
 	}
+    
 	gs->input_dev->id.vendor = GS_ST35DE;//for  akm8973 compass detect.
 
-
-
 	set_bit(EV_ABS,gs->input_dev->evbit);
-	
 	set_bit(ABS_X, gs->input_dev->absbit);
 	set_bit(ABS_Y, gs->input_dev->absbit);
 	set_bit(ABS_Z, gs->input_dev->absbit);
-	
 	set_bit(EV_SYN,gs->input_dev->evbit);
 
 
@@ -513,7 +492,6 @@ static int gs_probe(
 	//gs->input_dev->close = gs_st_input_close;
 	
 	input_set_drvdata(gs->input_dev, gs);
-	
 	
 	ret = input_register_device(gs->input_dev);
 	if (ret) {
@@ -524,11 +502,10 @@ static int gs_probe(
 	ret = misc_register(&gsensor_device);
 	if (ret) {
 		printk(KERN_ERR "gs_probe: gsensor_device register failed\n");
-
 		goto err_misc_device_register_failed;
 	}
 
-#ifndef   GS_POLLING 
+#ifndef GS_POLLING 
 	if (client->irq) {
 		ret = request_irq(client->irq, gs_irq_handler, 0, client->name, gs);
 		
@@ -542,7 +519,6 @@ static int gs_probe(
 	if (!gs->use_irq) {
 		hrtimer_init(&gs->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		gs->timer.function = gs_timer_func;
-		
 	}
 	
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -552,27 +528,22 @@ static int gs_probe(
 	register_early_suspend(&gs->early_suspend);
 #endif
 
-      gs_wq = create_singlethread_workqueue("gs_wq");
+    gs_wq = create_singlethread_workqueue("gs_wq");
 	if (!gs_wq)
 		return -ENOMEM;
 	
-	  this_gs_data =gs;
-
+	this_gs_data =gs;
 
 	printk(KERN_INFO "gs_probe: Start LIS35DE  in %s mode\n", gs->use_irq ? "interrupt" : "polling");
 
 	return 0;
 	
 err_misc_device_register_failed:
-		misc_deregister(&gsensor_device);
-		
-
+	misc_deregister(&gsensor_device);
 err_input_register_device_failed:
 	input_free_device(gs->input_dev);
-
-err_input_dev_alloc_failed:
+err_input_dev_alloc_failed:	
 err_detect_failed:
-	kfree(gs);
 #ifndef   GS_POLLING 
 	gs_free_int();
 #endif
@@ -589,12 +560,10 @@ static int gs_remove(struct i2c_client *client)
 		free_irq(client->irq, gs);
 	else
 		hrtimer_cancel(&gs->timer);
-	
+
 	misc_deregister(&gsensor_device);
-	
 	input_unregister_device(gs->input_dev);
 
-	
 	kfree(gs);
 	return 0;
 }
@@ -614,7 +583,6 @@ static int gs_suspend(struct i2c_client *client, pm_message_t mesg)
 		enable_irq(client->irq);
 
 	reg_write(gs, GS_ST_REG_CTRL3, 0); /* disable interrupt */
-	
 	reg_write(gs, GS_ST_REG_CTRL1, 0x00); /* deep sleep */
 
 	if (gs->power) {
@@ -634,15 +602,13 @@ static int gs_resume(struct i2c_client *client)
 						GS_ST_CTRL1_Yen|
 						GS_ST_CTRL1_Xen); /* enable abs int */
 	
-       reg_write(gs, GS_ST_REG_CTRL3, GS_INTMODE_DATA_READY);/*active mode*/
+    reg_write(gs, GS_ST_REG_CTRL3, GS_INTMODE_DATA_READY);/*active mode*/
     
 	if (!gs->use_irq)
 		hrtimer_start(&gs->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
 	else
 		enable_irq(client->irq);
 	
-	
-
 	return 0;
 }
 
@@ -663,7 +629,7 @@ static void gs_late_resume(struct early_suspend *h)
 #endif
 
 static const struct i2c_device_id gs_id[] = {
-	{ /*GS_I2C_NAME*/"gs_st", 0 },
+	{ "lis35de", 0 },
 	{ }
 };
 
@@ -676,7 +642,7 @@ static struct i2c_driver gs_driver = {
 #endif
 	.id_table	= gs_id,
 	.driver = {
-		.name	="gs_st",
+		.name	="lis35de",
 	},
 };
 

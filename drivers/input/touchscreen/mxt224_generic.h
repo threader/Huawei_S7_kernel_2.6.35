@@ -14,6 +14,8 @@
 #ifndef __MXT224_GENERIC_H__ 
 #define __MXT224_GENERIC_H__
 
+#pragma pack(1)
+
 #define QT_GLOBALS
 #ifdef  QT_GLOBALS
 #define QT_EXT  static
@@ -224,7 +226,7 @@ typedef struct
 #define SPT_GENERICDATA_T35                       35u
 #define RESERVED_T36                              36u
 #define DEBUG_DIAGNOSTIC_T37                      37u
-#define SPARE_T38                                 38u
+#define SPT_USERDATA_T38                          38u
 #define SPARE_T39                                 39u
 #define SPARE_T40                                 40u
 #define SPARE_T41                                 41u
@@ -339,6 +341,8 @@ typedef struct
 #if defined(__VER_1_4__) || defined(__VER_1_5__) ||defined(__VER_2_0__)
    uint8_t atchcalst;         /*!< recalibration suspend time after last detection */
    uint8_t atchcalsthr;       /*!< Anti-touch calibration suspend threshold */
+   uint8_t atchfrccalthr;       
+   uint8_t atchfrccalratio;       
 #endif
 } gen_acquisitionconfig_t8_config_t;
 
@@ -407,6 +411,8 @@ typedef struct
   uint8_t xedgedist;     /*!< LCMASK */
   uint8_t yedgectrl;     /*!< LCMASK */
   uint8_t yedgedist;     /*!< LCMASK */
+  uint8_t jumplimit;    
+  uint8_t tchhyst;     
 #endif
 
 } touch_multitouchscreen_t9_config_t;
@@ -534,6 +540,7 @@ typedef struct
    uint8_t pwm;              /*!< Port pwm enable register    */
    uint8_t period;           /*!< PWM period (min-max) percentage*/
    uint8_t duty[4];          /*!< PWM duty cycles percentage */
+   uint8_t trigger[4];  
 
 } spt_gpiopwm_t19_config_t;
 
@@ -586,8 +593,8 @@ typedef struct
 #endif
 
    uint8_t reserved1;
-   int16_t gcaful;
-   int16_t gcafll;
+   uint16_t gcaful;
+   uint16_t gcafll;
    
 #if defined(__VER_1_2__)
    uint8_t gcaflcount;
@@ -632,11 +639,11 @@ typedef struct
    uint8_t reserved_for_future_aks_usage;
    /* Detection Configuration */
    uint8_t blen;               /*!< ACMASK Burst length for all object channels*/
-   uint16_t tchthr;             /*!< LCMASK Threshold    */
-   uint8_t tchdi;              /*!< Detect integration config           */
+   uint16_t fxddthr;           
+   uint8_t fxddi;              
    uint8_t average;            /*!< LCMASK Sets the filter length on the prox signal */
-   uint16_t rate;               /*!< Sets the rate that prox signal must exceed */
-
+   uint16_t mvnullrate;          
+   uint16_t mvdthr; 
 } touch_proximity_t23_config_t;
 
 
@@ -748,10 +755,20 @@ typedef struct
    uint8_t mode;          /*!< LCMASK CTE mode configuration field */
    uint8_t idlegcafdepth; /*!< LCMASK The global gcaf number of averages when idle */
    uint8_t actvgcafdepth; /*!< LCMASK The global gcaf number of averages when active */
-
+   uint8_t voltage;
 } spt_cteconfig_t28_config_t;
 
-
+typedef struct
+{
+   uint8_t data0;         
+   uint8_t data1; 
+   uint8_t data2; 
+   uint8_t data3; 
+   uint8_t data4; 
+   uint8_t data5; 
+   uint8_t data6; 
+   uint8_t data7;    
+} spt_userdata_t38_config_t;
 
 /*! ==DEBUG_DIAGNOSTIC_T37==
  The Diagnostic Debug object holds the debug data. 
@@ -778,8 +795,7 @@ typedef struct
 {
     uint8_t mode;
     uint8_t page;
-    int8_t data[128];
-    
+    uint8_t data[128];
 } debug_diagnositc_t37_delta_t;
 
 typedef struct
@@ -881,6 +897,9 @@ enum driver_setup_t {DRIVER_SETUP_OK, DRIVER_SETUP_INCOMPLETE};
 /*! Offset to DIAGNOSTIC_CTRL register from the beginning of command processor. */
 #define DIAGNOSTIC_OFFSET   5u
 
+#define USERDATA_VERSION_OFFSET                              0u
+#define USERDATA_TOUCHSCREEN_OFFSET                     	1u
+
 /*----------------------------------------------------------------------------
 Function prototypes.
 ----------------------------------------------------------------------------*/
@@ -923,7 +942,12 @@ uint16_t get_object_address(uint8_t object_type, uint8_t instance);
 uint32_t get_stored_infoblock_crc(void);
 uint8_t calculate_infoblock_crc(uint32_t *crc_pointer);
 uint32_t CRC_24(uint32_t crc, uint8_t byte1, uint8_t byte2);
-
+uint8_t write_mem(uint16_t Address, uint8_t ByteCount, uint8_t *Data);
+uint8_t read_mem(uint16_t Address, uint8_t ByteCount, uint8_t *Data);
+int min_multitouch_report_id ;
+int tp_is_calibrating = 0   ;
+int tp_is_facesuppression = 0   ;
+int tp_config_err = 0   ;
 QT_EXT info_block_t *info_block;
 QT_EXT report_id_map_t *report_id_map;
 QT_EXT int max_report_id ;
@@ -947,8 +971,6 @@ QT_EXT void get_message(struct ts_event *tch);
 
 QT_EXT uint8_t init_touch_app(void);
 
-QT_EXT uint8_t write_mem(uint16_t Address, uint8_t ByteCount, uint8_t *Data);
-QT_EXT uint8_t read_mem(uint16_t Address, uint8_t ByteCount, uint8_t *Data);
 QT_EXT uint8_t read_uint16_t(uint16_t Address, uint16_t *Data);
 
 //QT_EXT void Change_TouchNum(uint8_t touch_num);
@@ -994,5 +1016,7 @@ unsigned char read_diagnostic_debug(debug_diagnositc_t37_t *dbg, unsigned char m
 
 QT_EXT unsigned short diagnostic_addr;
 QT_EXT unsigned short diagnostic_size;
+
+#pragma pack()
 #endif //__MXT224_GENERIC_H__
 

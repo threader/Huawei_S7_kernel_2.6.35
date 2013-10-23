@@ -142,7 +142,7 @@
 	
 #define MCI_FIFOHALFSIZE (MCI_FIFOSIZE / 2)
 
-#define NR_SG		16
+#define NR_SG		128
 
 struct clk;
 

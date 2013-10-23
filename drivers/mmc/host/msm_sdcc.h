@@ -166,7 +166,7 @@
 
 #define MCI_FIFOHALFSIZE (MCI_FIFOSIZE / 2)
 
-#define NR_SG		32
+#define NR_SG		128
 
 #define MSM_MMC_IDLE_TIMEOUT	10000 /* msecs */
 

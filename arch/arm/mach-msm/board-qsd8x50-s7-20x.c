@@ -398,7 +398,7 @@ static struct usb_composition usb_func_composition[] = {
 #endif
 
 static struct msm_handset_platform_data hs_platform_data = {
-	.hs_name = "8k_handset",
+	.hs_name = "s7_handset",
 	.pwr_key_delay_ms = 500, /* 0 will disable end key */
 };
 

@@ -59,6 +59,23 @@ config MTD_MSM_NAND
 	help
 	  Support for some NAND chips connected to the MSM NAND controller.
 
+
+choice
+	prompt "Choose MSM MTD block layer layout"
+	depends on MACH_QSD8X50_SURF_S7
+
+	config CONFIG_MSM_NAND_NEW_LAYOUT_ORIG
+		bool "MSM_MTD_LAYOUT ORIGINAL"
+		help
+		Keep orignial exsisting partition layoutt
+
+	config CONFIG_MSM_NAND_NEW_LAYOUT
+		bool "MSM_MTD_LAYOUT 488"
+		help
+		Extend system patition to 488 mb, decrease data and cache to 5.
+
+endchoice
+
 config MTD_DATAFLASH
 	tristate "Support for AT45xxx DataFlash"
 	depends on SPI_MASTER && EXPERIMENTAL

@@ -1,4 +1,5 @@
 #Android makefile to build kernel as a part of Android Build
+PERL		= perl
 
 ifeq ($(TARGET_PREBUILT_KERNEL),)
 
@@ -8,6 +9,31 @@ TARGET_PREBUILT_INT_KERNEL := $(KERNEL_OUT)/arch/arm/boot/zImage
 KERNEL_HEADERS_INSTALL := $(KERNEL_OUT)/usr
 KERNEL_MODULES_INSTALL := system
 KERNEL_MODULES_OUT := $(TARGET_OUT)/lib/modules
+KERNEL_IMG=$(KERNEL_OUT)/arch/arm/boot/Image
+
+MSM_ARCH ?= $(shell $(PERL) -e 'while (<>) {$$a = $$1 if /CONFIG_ARCH_((?:MSM|QSD)[a-zA-Z0-9]+)=y/; $$r = $$1 if /CONFIG_MSM_SOC_REV_(?!NONE)(\w+)=y/;} print lc("$$a$$r\n");' $(KERNEL_CONFIG))
+KERNEL_USE_OF ?= $(shell $(PERL) -e '$$of = "n"; while (<>) { if (/CONFIG_USE_OF=y/) { $$of = "y"; break; } } print $$of;' kernel/arch/arm/configs/$(KERNEL_DEFCONFIG))
+
+ifeq "$(KERNEL_USE_OF)" "y"
+DTS_NAME ?= $(MSM_ARCH)
+DTS_FILES = $(wildcard $(TOP)/kernel/arch/arm/boot/dts/$(DTS_NAME)*.dts)
+DTS_FILE = $(lastword $(subst /, ,$(1)))
+DTB_FILE = $(addprefix $(KERNEL_OUT)/arch/arm/boot/,$(patsubst %.dts,%.dtb,$(call DTS_FILE,$(1))))
+ZIMG_FILE = $(addprefix $(KERNEL_OUT)/arch/arm/boot/,$(patsubst %.dts,%-zImage,$(call DTS_FILE,$(1))))
+KERNEL_ZIMG = $(KERNEL_OUT)/arch/arm/boot/zImage
+DTC = $(KERNEL_OUT)/scripts/dtc/dtc
+
+define append-dtb
+mkdir -p $(KERNEL_OUT)/arch/arm/boot;\
+$(foreach d, $(DTS_FILES), \
+   $(DTC) -p 1024 -O dtb -o $(call DTB_FILE,$(d)) $(d); \
+   cat $(KERNEL_ZIMG) $(call DTB_FILE,$(d)) > $(call ZIMG_FILE,$(d));)
+endef
+else
+
+define append-dtb
+endef
+endif
 
 ifeq ($(TARGET_USES_UNCOMPRESSED_KERNEL),true)
 $(info Using uncompressed kernel)
@@ -36,34 +62,33 @@ $(KERNEL_OUT):
 	mkdir -p $(KERNEL_OUT)
 
 $(KERNEL_CONFIG): $(KERNEL_OUT)
-	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi- $(KERNEL_DEFCONFIG)
+	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi- $(KERNEL_DEFCONFIG)
 
 $(KERNEL_OUT)/piggy : $(TARGET_PREBUILT_INT_KERNEL)
 	$(hide) gunzip -c $(KERNEL_OUT)/arch/arm/boot/compressed/piggy.gzip > $(KERNEL_OUT)/piggy
 
 $(TARGET_PREBUILT_INT_KERNEL): $(KERNEL_OUT) $(KERNEL_CONFIG) $(KERNEL_HEADERS_INSTALL)
-	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi-
-	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi- modules
-	$(MAKE) -C kernel O=../$(KERNEL_OUT) INSTALL_MOD_PATH=../../$(KERNEL_MODULES_INSTALL) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi- modules_install
+	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi-
+	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi- modules
+	$(MAKE) -C kernel O=../$(KERNEL_OUT) INSTALL_MOD_PATH=../../$(KERNEL_MODULES_INSTALL) ARCH=arm CROSS_COMPILE=arm-eabi- modules_install
 	mkdir -p $(TARGET_OUT)/lib/modules
-#	-cp $(KERNEL_OUT)/drivers/mmc/host/msm_sdcc.ko $(TARGET_OUT)/lib/modules
 	-cp $(KERNEL_OUT)/drivers/net/wireless/bcm4329/bcm4329.ko $(TARGET_OUT)/lib/modules # dhd.ko
-#	-cp $(KERNEL_OUT)/drivers/net/wireless/libra/libra.ko $(TARGET_OUT)/lib/modules # libra 
 	-cp $(KERNEL_OUT)/drivers/net/wireless/libra/librasdioif.ko $(TARGET_OUT)/lib/modules # 
 	$(mv-modules)
 #	$(clean-module-folder)
+	$(append-dtb)
 
 $(KERNEL_HEADERS_INSTALL): $(KERNEL_OUT) $(KERNEL_CONFIG)
-	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi- headers_install
+	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi- headers_install
 
 kerneltags: $(KERNEL_OUT) $(KERNEL_CONFIG)
-	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi- tags
-	#$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/media/8c8a9f3b-7ce1-4430-98c9-d14b454d4e7f/s7/Sourcery_G++_Lite/bin/arm-eabi- tags
+	$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi- tags
 
 kernelconfig: $(KERNEL_OUT) $(KERNEL_CONFIG)
 	env KCONFIG_NOTIMESTAMP=true \
-		$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/linaro/linaro-4.6-neon/bin/arm-eabi- menuconfig
-		#$(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=/home/mike/dev/compiler/arm-android/Sourcery_G++_Lite/bin/arm-none-eabi- 
-	cp $(KERNEL_OUT)/.config kernel/arch/arm/configs/$(KERNEL_DEFCONFIG)
+	     $(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi- menuconfig
+	env KCONFIG_NOTIMESTAMP=true \
+	     $(MAKE) -C kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=arm-eabi- savedefconfig
+	cp $(KERNEL_OUT)/defconfig kernel/arch/arm/configs/$(KERNEL_DEFCONFIG)
 
 endif

@@ -417,7 +417,7 @@ static struct usb_composition usb_func_composition[] = {
 #endif
 
 static struct msm_handset_platform_data hs_platform_data = {
-	.hs_name = "8k_handset",
+	.hs_name = "s7_handset",
 	.pwr_key_delay_ms = 500, /* 0 will disable end key */
 };
 
@@ -2954,7 +2954,7 @@ static struct sdcc_gpio sdcc_cfg_data[] = {
 	},
 };
 
-static unsigned long vreg_sts = 0, gpio_sts = 0;
+static unsigned long vreg_sts, gpio_sts;
 
 static void msm_sdcc_setup_gpio(int dev_id, unsigned int enable)
 {
@@ -3247,7 +3247,7 @@ static struct mmc_platform_data qsd8x50_sdc3_data = {
 	.msmsdcc_fmin	= 144000,
 	.msmsdcc_fmid	= 25000000,
 	.msmsdcc_fmax	= 49152000,
-	.nonremovable	= 0,
+	.nonremovable	= 1,
 };
 #endif
 
@@ -3619,8 +3619,7 @@ static void __init qsd8x50_init(void)
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 	msm_fb_add_devices();
 #ifdef CONFIG_MSM_CAMERA
-       /*lijuan rm*/
-	/*config_camera_off_gpios();*/ /* might not be necessary */
+	config_camera_off_gpios(); /* might not be necessary */
 #endif
 	qsd8x50_init_usb();
 	qsd8x50_init_mmc();

@@ -73,6 +73,23 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 		ptn->name = name;
 		ptn->offset = entry->offset;
 		ptn->size = entry->size;
+#if defined(CONFIG_MSM_NAND_NEW_LAYOUT)
+
+                if (!strcmp(name, "system"))
+                {
+                        ptn->offset = 0x201;
+                        ptn->size = 0xd88;
+                }
+                else if (!strcmp(name, "cache"))
+                {
+                        ptn->offset = 0xf89;
+                        ptn->size = 0x28;
+                }
+                else if (!strcmp(name, "userdata")){
+                        ptn->offset = 0xfb1;
+                        ptn->size = 0x28;
+                }
+#endif
 
 		printk(KERN_INFO "Partition (from atag) %s "
 				"-- Offset:%llx Size:%llx\n",

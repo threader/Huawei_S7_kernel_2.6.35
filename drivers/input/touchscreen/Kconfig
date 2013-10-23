@@ -358,9 +358,14 @@ config SYNA_MT
 	bool "T1320 pointing using Linux 2.6.31 multi-touch system"
 	depends on TOUCHSCREEN_T1320
 
-config UPDATE_TS_FIRMWARE
+config UPDATE_T1320_FIRMWARE
 	bool "Surport download t1320 firmware function"
 	depends on TOUCHSCREEN_T1320
+
+config DEBUG_T1320_FIRMWARE
+	bool "Surport debug t1320 firmware function"
+	depends on UPDATE_T1320_FIRMWARE
+
 config TOUCHSCREEN_MXT224
 	tristate "mXT224 based touchscreens"
 	depends on I2C

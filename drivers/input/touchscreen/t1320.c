@@ -22,8 +22,7 @@
  * GNU General Public License for more details.
  *
  */
-#include <linux/slab.h>
-#include <linux/module.h>        
+#include <linux/module.h>  
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/hrtimer.h>
@@ -34,16 +33,32 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/earlysuspend.h>
-#ifdef CONFIG_UPDATE_TS_FIRMWARE 
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE 
 #include <linux/uaccess.h> 
 #include <linux/vmalloc.h>
 #include <mach/msm_rpcrouter.h>
 #endif
+#include <linux/slab.h>
 
 #define BTN_F19 BTN_0
 #define BTN_F30 BTN_0
 #define SCROLL_ORIENTATION REL_Y
 
+/*maxium power up reset times*/
+#define MAX_POWERRESET_NUM 10 
+/*enable power up reset*/
+static int power_reset_enable = 1 ;
+/*current power up reset times*/
+static int power_reset_cnt = 0 ;
+static struct workqueue_struct *t1320_wq_reset;
+//#define GPIO_3V3_EN (28)  
+#define GPIO_CTP_POWER             (28)  
+#define GPIO_CTP_INT   			(28)
+#define GPIO_CTP_RESET       	(158)
+extern int msm_gpiomux_put(unsigned gpio);
+extern int msm_gpiomux_get(unsigned gpio);
+static int is_upgrade_firmware = 0 ;
+void poweron_touchscreen(void);
 static struct workqueue_struct *t1320_wq;
 
 /* Register: EGR_0 */
@@ -65,6 +80,13 @@ static struct workqueue_struct *t1320_wq;
 #define EGR_PALM_DETECT_REG	1
 #define EGR_PALM_DETECT		(1 << 0)
 
+#define VALUE_ABS_MT_TOUCH_MAJOR	0x4
+#define VALUE_ABS_MT_TOUCH_MINOR	0x3
+static unsigned char f01_rmi_ctrl0 = 0;
+static unsigned char f01_rmi_data1 = 0;
+
+static unsigned char f11_rmi_ctrl0 = 0;
+
 struct t1320_function_descriptor {
 	__u8 queryBase;
 	__u8 commandBase;
@@ -72,7 +94,6 @@ struct t1320_function_descriptor {
 	__u8 dataBase;
 	__u8 intSrc;
     
-#define FUNCTION_VERSION(x) ((x >> 5) & 3)
 #define INTERRUPT_SOURCE_COUNT(x) (x & 7)
 
 	__u8 functionNumber;
@@ -81,40 +102,22 @@ struct t1320_function_descriptor {
 #define FD_ADDR_MIN 0x05
 #define FD_BYTE_COUNT 6
 
-#define MIN_ACTIVE_SPEED 5
+
+/* begin: added by huangzhikui for scaling axis 2010/12/25 */
 
 #define TOUCH_LCD_X_MAX	3128
 #define TOUCH_LCD_Y_MAX	1758
 
-/*virtual key boundarys*/
-#define CTP_HOME_X		3340
-#define CTP_HOME_Y		382
-#define CTP_MENU_X		3340
-#define CTP_MENU_Y		915
-#define CTP_BACK_X		3340
-#define CTP_BACK_Y		1434
-#define KEYPAD_DIAMETER				200
-#define KEYPAD_AREA(x, y, KEYNAME) 	((x >= CTP_##KEYNAME##_X - KEYPAD_DIAMETER / 2) \
-									 && (x <= CTP_##KEYNAME##_X + KEYPAD_DIAMETER / 2) \
-								     && (y >= CTP_##KEYNAME##_Y - KEYPAD_DIAMETER / 2) \
-        	                         && (y <= CTP_##KEYNAME##_Y + KEYPAD_DIAMETER / 2))
 
-#define TOUCH_HOME		(1 << 0)
-#define TOUCH_MENU		(1 << 1)
-#define TOUCH_BACK		(1 << 2)
-#define TOUCH_PEN		(1 << 3)
+/* end: added by huangzhikui for scaling axis 2010/12/25 */
 
-static int touch_state = 0;
-
-#define VALUE_ABS_MT_TOUCH_MAJOR	0x4
-#define VALUE_ABS_MT_TOUCH_MINOR	0x3
-
-static unsigned char f01_rmi_ctrl0 = 0;
-static unsigned char f01_rmi_data1 = 0;
-
+/* start: added by liyaobing 00169718 for MMI test 20110105 */
 static unsigned char g_tm1771_dect_flag = 0;
+/* end: added by liyaobing 00169718 for MMI test 20110105 */
 
-static unsigned char finger_num=0;
+/* begin: added by liyaobing 2011/1/6 */
+//static unsigned char finger_num=0;
+/* end: added by liyaobing 2011/1/6 */
 
 /* define in platform/board file(s) */
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -123,7 +126,7 @@ static void t1320_late_resume(struct early_suspend *h);
 #endif
 static int t1320_attn_clear(struct t1320 *ts);
 
-#ifdef CONFIG_UPDATE_TS_FIRMWARE 
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE 
 static struct update_firmware_addr {
 	char f01_t1320_tm1771_cmd0 ;
 	char f01_t1320_tm1771_query0 ;
@@ -137,18 +140,97 @@ static struct update_firmware_addr {
 	char f34_t1320_tm1771_data3	;
 } update_firmware_addr ;
 #define  Manufacturer_ID  0x01
+/* start: added by liyaobing 00169718 for firmware update download 20110118 */
+//#define TOUCHSCREEN_TYPE "t1320_tm1828"
 #define TOUCHSCREEN_TYPE "t1320_tm1771"
+/* end: added by liyaobing 00169718 for firmware update download 20110118 */
+#ifdef CONFIG_DEBUG_T1320_FIRMWARE 
+#define FLAG_RR 			0x00
+#define FLAG_WR 		0x01
+#define FLAG_RPX 		0x02
+#define FLAG_RPY 		0x03
+#define FLAG_RNIT 		0x04
+#define FLAG_HRST 		0x05
+#define FLAG_SRST 		0x06
+#define FLAG_EINT 		0x07
+#define FLAG_DINT 		0x08
+/*tp file struct(bytes):
+	0:		RFLAG_ENABLE_TA
+	1~2:	RFLAG_REPORT_NUM
+	3~4:	RFLAG_RESEVER
+	5+LAYER_PTHASE_NUM*LAYER_PHASE_DATA_NUM ~ 5+((LAYER_PTHASE_NUM+1)*LAYER_PHASE_DATA_NUM-1): tp timing data
+*/
+#define FLAG_RTA 		0x09
+#define FLAG_PRST 		0x0a 
+#define FLAG_POFF 		0x0b 
+#define FLAG_EFW 		0x0c 
+#define FLAG_DBG 		0x11 
+enum  layer_phase
+{
+    LAYER_PTHASE_DRIVER = 0x0,
+    LAYER_PTHASE_EVENTHUB,
+    LAYER_PTHASE_DISPATCH,
+    MAX_LAYER_PTHASE,
+    WFLAG_ENABLE_TA = 0xFE,
+};
+enum  read_flag
+{
+    RFLAG_ENABLE_TA = 0x0,
+    RFLAG_REPORT_NUM,
+    RFLAG_RESEVER=RFLAG_REPORT_NUM+2,/*report num is 2 bytes*/
+    RFLAG_LAYER_PHASE_START = RFLAG_RESEVER+2/*resever 2 bytes for future use*/
+};
+#define  LAYER_PHASE_DATA_NUM	24 /* 24 = SIZEOF(time_tp) = 4*2*3 = 4:sizeof(long int) 2:tv_sec /tv_usec 3:time_first_start/time_first_end/time_last_end*/
+#define MAX_DATA_NUM  		RFLAG_LAYER_PHASE_START +MAX_LAYER_PTHASE*LAYER_PHASE_DATA_NUM
 
+char time_ta[MAX_DATA_NUM]={0};
+struct time_tp {
+	struct timespec  time_first_start; /* first point start time of one action phase*/
+	struct timespec  time_first_end;   /* first point end time of one action phase*/
+	struct timespec  time_last_end;   /* last point end time of one action phase*/
+};
+struct time_tp time_tp ;
+
+bool  flag_first_point;	 /* flag of whether it is first point */
+bool  flag_last_point;	 /* flag of whether it is last point */
+char flag_enable_ta = false ;
+unsigned short  sensor_report_num = 0 ;
+
+irqreturn_t t1320_irq_handler(int irq, void *dev_id);
+static void t1320_disable(struct t1320 *ts);
+static void t1320_enable(struct t1320 *ts);
+static int ts_debug_X = 0 ;
+static int ts_debug_Y = 0 ;
+static int debug_level = 0 ;
+static ssize_t ts_debug_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
+static ssize_t ts_debug_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
+
+firmware_attr(ts_debug);
+#endif
 static struct i2c_client *g_client = NULL;
 static ssize_t update_firmware_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
 static ssize_t update_firmware_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
+static ssize_t firmware_version_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
+static ssize_t firmware_version_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
+
+static ssize_t tp_control_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
+static ssize_t tp_control_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
+firmware_attr(tp_control);
 
 static int ts_firmware_file(void);
 static int i2c_update_firmware(struct i2c_client *client, const  char * filename); 
 
 firmware_attr(update_firmware);
+firmware_attr(firmware_version);
+
+#define F01_PRODUCTID_QUERY_OFFSET		11
+#define F01_PRODUCTID_SIZE					10
+static ssize_t firmware_tptype_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
+static ssize_t firmware_tptype_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
+firmware_attr(firmware_tptype);
 #endif
 
+/* start: added by liyaobing 00169718 for MMI test 20110105 */ 
 static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attribute *attr,
         char *buf)
  {
@@ -157,7 +239,7 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
 
 // Define the device attributes 
  static struct kobj_attribute cap_touchscreen_attribute =
-         __ATTR(state, 0666, cap_touchscreen_attr_show, NULL);
+         __ATTR(state, 0664, cap_touchscreen_attr_show, NULL);
 
  static struct attribute* cap_touchscreen_attributes[] =
  {
@@ -169,8 +251,9 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
  {
      .attrs = cap_touchscreen_attributes,
  };
+ /* end: added by liyaobing 00169718 for MMI test 20110105 */ 
 
-#ifdef CONFIG_UPDATE_TS_FIRMWARE 
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE 
  struct T1320_TM1771_FDT{
    unsigned char m_QueryBase;
    unsigned char m_CommandBase;
@@ -189,7 +272,7 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
      struct i2c_msg msg[2];
      unsigned short start_addr; 
  		 int ret=0;
- 		  
+ 
      memset(&m_PdtF34Flash,0,sizeof(struct T1320_TM1771_FDT));
      memset(&m_PdtF01Common,0,sizeof(struct T1320_TM1771_FDT));
  
@@ -226,14 +309,15 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
              break;
          }
        }
- 
      if((m_PdtF01Common.m_CommandBase != update_firmware_addr.f01_t1320_tm1771_cmd0) || (m_PdtF34Flash.m_QueryBase != update_firmware_addr.f34_t1320_tm1771_query0)){
          return -1;
      }
+ 
      return 0;
  
  } 
  
+ //to be improved .......
  int t1320_tm1771_wait_attn(struct i2c_client * client,int udleay)
  {
      int loop_count=0;
@@ -259,7 +343,7 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
    
      // Issue a reset command
      i2c_smbus_write_byte_data(client,update_firmware_addr.f01_t1320_tm1771_cmd0,0x01);
- 
+     
      // Wait for ATTN to be asserted to see if device is in idle state
      t1320_tm1771_wait_attn(client,20);
  
@@ -320,10 +404,12 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
      m_firmwareImgVersion = SynaFirmware[7];
      m_firmwareImgSize    = ExtractLongFromHeader(&(SynaFirmware[8]));
      m_configImgSize      = ExtractLongFromHeader(&(SynaFirmware[12]));
+  
      UI_block_count  = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query5);
      fw_block_size = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query3);
      CONF_block_count = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query7);
      bootloader_id = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query0);
+     
        return (m_firmwareImgVersion != 0 || bootloader_id == m_bootloadImgID) ? 0 : -1;
  
  }
@@ -336,6 +422,7 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
      unsigned short block_index;
      const unsigned char * p_data;
      int i;
+     
      block_size = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query3);
      switch(type_cmd ){
          case 0x02:
@@ -389,6 +476,7 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
      int ret;
      unsigned short block_size;
      unsigned short ui_blocks;
+ 
      block_size = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query3);
      ui_blocks = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query5);    //UI Firmware
  
@@ -404,7 +492,6 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
  {
      int ret=0;
      unsigned short bootloader_id;
- 
  
      //read and write back bootloader ID
      bootloader_id = i2c_smbus_read_word_data(client,update_firmware_addr.f34_t1320_tm1771_query0);
@@ -460,7 +547,11 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
          goto error;
      }
  
-     t1320_tm1771_program_configuration(client, pgm_data +  0x100);
+     ret = t1320_tm1771_program_configuration(client, pgm_data +  0x100);
+     if( ret != 0){
+         printk("%s:%d:t1320_tm1771 program configuration error,return...",__FUNCTION__,__LINE__);
+         goto error;
+     }
      return t1320_tm1771_disable_program(client);
  
  error:
@@ -555,16 +646,243 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
          printk("create file error\n");
          return -1;
      }
+     ret = sysfs_create_file(kobject_ts, &firmware_version_attr.attr);
+     if (ret) {
+         kobject_put(kobject_ts);
+         printk("create file error\n");
+         return -1;
+     }
+
+	ret = sysfs_create_file(kobject_ts, &tp_control_attr.attr);
+	if (ret) {
+	    kobject_put(kobject_ts);
+	    printk("create file error\n");
+	    return -1;
+	}
+
+#ifdef CONFIG_DEBUG_T1320_FIRMWARE 
+     ret = sysfs_create_file(kobject_ts, &ts_debug_attr.attr);
+     if (ret) {
+         kobject_put(kobject_ts);
+         printk("create debug_ts file error\n");
+         return -1;
+     }	  
+#endif
+     ret = sysfs_create_file(kobject_ts, &firmware_tptype_attr.attr);
+     if (ret) {
+         kobject_put(kobject_ts);
+         printk("create tptype file error\n");
+         return -1;
+     }
      return 0;   
  }
+
+void poweron_touchscreen(void){
+    struct t1320  * ts ;
+    ts = (struct t1320 *)g_client->dev.platform_data; 
+    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
+       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
+    if(i2c_smbus_read_byte_data(g_client,0x00) < 0){
+        printk("touchscreen has poweroff and wil poweron for do some operation\n");
+        msm_gpiomux_get(GPIO_CTP_POWER);
+        msm_gpiomux_get(GPIO_CTP_INT);   
+        msm_gpiomux_get(GPIO_CTP_RESET);  
+        ts->chip_poweron_reset() ; 
+    }
+    /*for update_firmware ,it should delay 500ms for touchscreen poweron reset complete*/
+    if(1 == is_upgrade_firmware){
+		msleep(500) ;
+    }
+}
+	
+#ifdef CONFIG_DEBUG_T1320_FIRMWARE
+ static ssize_t ts_debug_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
+ {
+	memcpy(time_ta+RFLAG_LAYER_PHASE_START,&time_tp,LAYER_PHASE_DATA_NUM);
+	memcpy(time_ta+RFLAG_REPORT_NUM,&sensor_report_num,sizeof(unsigned short));	
+	memcpy(buf,time_ta,MAX_DATA_NUM); 
+	return MAX_DATA_NUM ;
+ }
  
+ static ssize_t ts_debug_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+ {
+     struct t1320  * ts ;
+     int ret = 0 ;
+     unsigned short bootloader_id;
+     ts = (struct t1320 *)g_client->dev.platform_data; 
  
+     if(buf[0] == FLAG_RR){
+             return i2c_smbus_read_byte_data(g_client,buf[1]);
+     }else if(buf[0] == FLAG_WR){
+	 if(i2c_smbus_write_byte_data(g_client, buf[1],buf[2]) < 0){
+                 return 0 ;
+        }
+	 else
+	 	return 1 ;
+     }else if(buf[0] == FLAG_RPX){
+		return ts_debug_X ;
+     }else if(buf[0] == FLAG_RPY){
+		return ts_debug_Y ;
+     }else if(buf[0] == FLAG_RNIT){
+		return ts->interrupts_pin_status() ;
+     }else if(buf[0] == FLAG_HRST){
+		return ts->chip_reset() ; ;
+     }else  if(buf[0] == FLAG_SRST){
+     		ret =  i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_cmd0);
+		ret |= 0x01  ;
+		 if(i2c_smbus_write_byte_data(g_client, update_firmware_addr.f01_t1320_tm1771_cmd0,ret) < 0){
+	                 return 0 ;
+	        }
+		 else
+		 	return 1 ;
+     }else if(buf[0] == FLAG_EINT){
+            /*if not interrupts modem ,return fail*/
+           if (0 == ts->use_irq)
+	        return 0 ;
+            /*register msm8660 interrupts*/
+	     ret = request_irq(g_client->irq, t1320_irq_handler,IRQF_TRIGGER_LOW,  g_client->name, ts);
+	     if(ret) {
+	         printk(KERN_ERR "Failed to request IRQ!ret = %d\n", ret); 
+		  return 0 ;
+	     }
+		 
+	    /*clear t1320 interrupt flag*/
+	    t1320_attn_clear(ts);
+	    /*t1320 leave sleep mode*/
+	    ret = i2c_smbus_read_byte_data(g_client,f01_rmi_ctrl0);
+	    ret &=  ~(0x03);
+	    i2c_smbus_write_byte_data(g_client,f01_rmi_ctrl0,ret);
+	    return 1 ;
+     }else if(buf[0] == FLAG_DINT){
+           /*if not interrupts modem ,return fail*/
+           if (0 == ts->use_irq )
+	        return 0 ;
+	     /*t1320 enter sleep mode*/
+	    ret = i2c_smbus_read_byte_data(g_client,f01_rmi_ctrl0);
+	    ret = (ret | 1) & (~(1 << 1)) ;
+	    i2c_smbus_write_byte_data(g_client,f01_rmi_ctrl0,ret);
+	    /*clear t1320 interrupt flag*/
+	    t1320_attn_clear(ts);
+	   /*disable msm8660 interrupts*/
+	    t1320_disable(ts);
+	   /*unregister msm8660 interrupts*/
+	    free_irq(g_client->irq, ts);
+	    return 1 ;
+ }else if(buf[0] == FLAG_RTA){
+       if(buf[1] == WFLAG_ENABLE_TA){
+		flag_enable_ta = buf[2] ;
+		time_ta[RFLAG_ENABLE_TA] = flag_enable_ta ;
+		return 1 ;
+      	}else if(buf[1]== LAYER_PTHASE_DRIVER){
+		return 1 ;/*write of time_ta is at ts_debug_show(),so here return directly */
+      }else if((buf[1]>= LAYER_PTHASE_EVENTHUB) &&  (buf[1] <= MAX_LAYER_PTHASE)){
+   		memcpy(time_ta+RFLAG_LAYER_PHASE_START+buf[1]*LAYER_PHASE_DATA_NUM,buf+2,LAYER_PHASE_DATA_NUM);  
+		return 1 ;
+      } else
+	 	return 0 ;
+     }else  if(buf[0] == FLAG_PRST){
+        /*enable power reset after execute power up debug command*/
+        power_reset_enable = 1 ;
+        return ts->chip_poweron_reset() ; 
+    }else  if(buf[0] == FLAG_POFF){
+        /*disable power reset after execute power off debug command*/
+        power_reset_enable = 0 ;
+        return ts->chip_poweroff() ; 
+   }else  if(buf[0] == FLAG_EFW){
+		  if(t1320_tm1771_enable_program(g_client) != 0){
+		         printk("t1320_tm1771 page func check error\n");
+		         return 0;
+	       }
+		  bootloader_id = i2c_smbus_read_word_data(g_client,update_firmware_addr.f34_t1320_tm1771_query0);
+          i2c_smbus_write_word_data(g_client,update_firmware_addr.f34_t1320_tm1771_data2, bootloader_id );
+     		//issue erase commander
+     		if(i2c_smbus_write_byte_data(g_client, update_firmware_addr.f34_t1320_tm1771_data3, 0x03) < 0){
+	         	printk("t1320_tm1771_program_firmware error, erase firmware error \n");
+	         	return 0;
+	      }
+    		 t1320_tm1771_wait_attn(g_client,300);
+	     //check status
+	     if((ret = i2c_smbus_read_byte_data(g_client,update_firmware_addr.f34_t1320_tm1771_data3)) != 0x80){
+			 printk("check firmware status error!\n");
+	         return 0;
+     		}
+		 return 1 ;
+    }else if(buf[0] == FLAG_DBG){
+	       	 debug_level = buf[1] ;
+		return 1 ;
+   }else {
+		return 0;
+     }
+  }
+ #endif
+ 
+  static ssize_t firmware_version_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
+ {
+       char  ret = -1;
+	   
+    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
+       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
+	poweron_touchscreen();
+       ret = i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_query0+3);
+	return sprintf(buf, "%03d", ret) ;
+ }
+ 
+ static ssize_t firmware_version_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+ {
+	return 0;
+ }
+
+  static ssize_t tp_control_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
+  {
+      return 0;
+  }
+ 
+  static ssize_t tp_control_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+  {
+      struct t1320  * ts ;
+      int on = -1;
+      ts = (struct t1320 *)g_client->dev.platform_data;     
+      on = simple_strtoul(buf, NULL, 0);
+      if (on == 0 && is_upgrade_firmware == 0) {
+      	power_reset_enable = 0;
+        ts->chip_poweroff() ;
+      	return  count;
+      } else if (on == 1) {      
+      	power_reset_enable = 1;
+      	ts->chip_poweron_reset(); 
+        return count;
+      } else {
+			printk(KERN_ERR "Invalid argument or firmware upgrading.");
+            return -1;
+      }
+  }
+  static ssize_t firmware_tptype_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
+ {
+	char tptype[F01_PRODUCTID_SIZE+1]={0};
+	unsigned char i=0;
+
+    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
+       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
+	poweron_touchscreen();
+	
+	for(i=0;i<F01_PRODUCTID_SIZE;i++)
+       	tptype[i] = i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_query0+F01_PRODUCTID_QUERY_OFFSET+i);
+
+	return sprintf(buf, "%s", tptype) ;
+ }
+ 
+ static ssize_t firmware_tptype_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+ {
+	return 0;
+ }
  /*
   * The "update_firmware" file where a static variable is read from and written to.
   */
  static ssize_t update_firmware_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
  {
+  /* start: modify by liyaobing 00169718 for firmware update download 20110118 */
      return sprintf(buf, "%s", TOUCHSCREEN_TYPE);	
+  /* end: modify by liyaobing 00169718 for firmware update download 20110118 */    
  }
  
  static ssize_t update_firmware_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
@@ -600,6 +918,12 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
          return -1;
  
  firmware_find_device:
+        /*disable power reset when firmware upgrade*/
+        power_reset_enable = 0 ;
+        is_upgrade_firmware = 1 ;
+    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
+       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
+       poweron_touchscreen();
          disable_irq(g_client->irq);          
          ret = i2c_update_firmware(g_client, path_image);
          enable_irq(g_client->irq);
@@ -613,64 +937,13 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
              ret = 1;
          }
      }
-     
+        /*enable power reset after firmware upgrade*/
+        power_reset_enable = 1 ;
+        is_upgrade_firmware = 0 ;
      return ret;
   }
  
 #endif
-
-static void ts_update_pen_state(struct t1320 *ts, int x, int y, int pressure, int wx, int wy)
-{
-
-	if (pressure) {
-#ifdef CONFIG_SYNA_MOUSE
-		input_report_abs(ts->input_dev, ABS_X, x);
-		input_report_abs(ts->input_dev, ABS_Y, y);
-		input_report_abs(ts->input_dev, ABS_PRESSURE, pressure);
-		input_report_key(ts->input_dev, BTN_TOUCH, !!pressure);
-#endif
-
-#ifdef CONFIG_SYNA_MT
-		input_report_abs(ts->input_dev, ABS_MT_POSITION_X, x);
-        input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, y);
-		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 4/*max(wx, wy)*/);
-		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR, 3/*min(wx, wy)*/);
-		input_report_abs(ts->input_dev, ABS_MT_ORIENTATION, (wx > wy ? 1 : 0));
-		input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, pressure/2);
-        input_mt_sync(ts->input_dev);
-#endif
-	} else {
-        /* begin: modify by liyaobing 2011/1/6 */
-		if (touch_state & TOUCH_PEN){
-#ifdef CONFIG_SYNA_MOUSE		
-			input_report_abs(ts->input_dev, ABS_PRESSURE, 0);
-			input_report_key(ts->input_dev, BTN_TOUCH, 0);
-#endif
-
-#ifdef CONFIG_SYNA_MT
-	        input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-			input_mt_sync(ts->input_dev);
-#endif
-			touch_state &= ~TOUCH_PEN;
-		}
-
-        if (touch_state & TOUCH_HOME) {
-	        input_report_key(ts->input_dev, KEY_HOME, 0);
-	        touch_state &= ~TOUCH_HOME;
-		} 
-
-	    if (touch_state & TOUCH_MENU) {
-	        input_report_key(ts->input_dev, KEY_MENU, 0);
-	        touch_state &= ~TOUCH_MENU;
-		}
-
-	    if (touch_state & TOUCH_BACK) {
-	        input_report_key(ts->input_dev, KEY_BACK, 0);
-	        touch_state &= ~TOUCH_BACK;
-		}
-        /* end: modify by liyaobing 2011/1/6 */
-	}
-}
 
 static int t1320_read_pdt(struct t1320 *ts)
 {
@@ -734,7 +1007,7 @@ static int t1320_read_pdt(struct t1320 *ts)
 			case 0x01: /* Interrupt */
 				ts->f01.data_offset = fd.dataBase;
 				f01_rmi_ctrl0 = fd.controlBase;
-                f01_rmi_data1 = fd.dataBase+1 ;
+        f01_rmi_data1 = fd.dataBase+1 ;
 				/*
 				 * Can't determine data_length
 				 * until whole PDT has been read to count interrupt sources
@@ -745,7 +1018,7 @@ static int t1320_read_pdt(struct t1320 *ts)
 				break;
 			case 0x11: /* 2D */
 				ts->hasF11 = true;
-
+				f11_rmi_ctrl0 = fd.controlBase;
 				ts->f11.data_offset = fd.dataBase;
 				ts->f11.interrupt_offset = interruptCount / 8;
 				ts->f11.interrupt_mask = ((1 << INTERRUPT_SOURCE_COUNT(fd.intSrc)) - 1) << (interruptCount % 8);
@@ -760,36 +1033,24 @@ static int t1320_read_pdt(struct t1320 *ts)
 
 				ts->f11_fingers = kcalloc(ts->f11.points_supported,
 				                          sizeof(*ts->f11_fingers), 0);
-
 				ts->f11_has_gestures = (query[1] >> 5) & 1;
 				ts->f11_has_relative = (query[1] >> 3) & 1;
 
+				/* robert mccarthy fix for DroidBench touch problem, begin 2011/9/21 */
+                i2c_smbus_write_byte_data(ts->client, fd.controlBase+2, 0x19);
+                i2c_smbus_write_byte_data(ts->client, fd.controlBase+3, 0x19);
+				/* robert mccarthy fix for DroidBench touch problem, end 2011/9/21 */
+
 				egr = &query[7];
 
-#define EGR_DEBUG
-#ifdef EGR_DEBUG
-#define EGR_INFO printk
-#else
-#define EGR_INFO
-#endif
-				EGR_INFO("EGR features:\n");
 				ts->hasEgrPinch = egr[EGR_PINCH_REG] & EGR_PINCH;
-				EGR_INFO("\tpinch: %u\n", ts->hasEgrPinch);
 				ts->hasEgrPress = egr[EGR_PRESS_REG] & EGR_PRESS;
-				EGR_INFO("\tpress: %u\n", ts->hasEgrPress);
 				ts->hasEgrFlick = egr[EGR_FLICK_REG] & EGR_FLICK;
-				EGR_INFO("\tflick: %u\n", ts->hasEgrFlick);
 				ts->hasEgrEarlyTap = egr[EGR_EARLY_TAP_REG] & EGR_EARLY_TAP;
-				EGR_INFO("\tearly tap: %u\n", ts->hasEgrEarlyTap);
 				ts->hasEgrDoubleTap = egr[EGR_DOUBLE_TAP_REG] & EGR_DOUBLE_TAP;
-				EGR_INFO("\tdouble tap: %u\n", ts->hasEgrDoubleTap);
 				ts->hasEgrTapAndHold = egr[EGR_TAP_AND_HOLD_REG] & EGR_TAP_AND_HOLD;
-				EGR_INFO("\ttap and hold: %u\n", ts->hasEgrTapAndHold);
 				ts->hasEgrSingleTap = egr[EGR_SINGLE_TAP_REG] & EGR_SINGLE_TAP;
-				EGR_INFO("\tsingle tap: %u\n", ts->hasEgrSingleTap);
 				ts->hasEgrPalmDetect = egr[EGR_PALM_DETECT_REG] & EGR_PALM_DETECT;
-				EGR_INFO("\tpalm detect: %u\n", ts->hasEgrPalmDetect);
-
 
 				query_i2c_msg[0].buf = &fd.controlBase;
 				ret = i2c_transfer(ts->client->adapter, query_i2c_msg, 2);
@@ -801,7 +1062,6 @@ static int t1320_read_pdt(struct t1320 *ts)
 				ts->f11_max_x = ((query[7] & 0x0f) * 0x100) | query[6];
 				ts->f11_max_y = ((query[9] & 0x0f) * 0x100) | query[8];
 
-				printk("max X: %d; max Y: %d\n", ts->f11_max_x, ts->f11_max_y);
 
 				ts->f11.data_length = data_length =
 					/* finger status, four fingers per register */
@@ -855,7 +1115,7 @@ static int t1320_read_pdt(struct t1320 *ts)
 				ts->f30.data_length = data_length = (ts->f30.points_supported + 7) / 8;
 
 				break;
-#ifdef CONFIG_UPDATE_TS_FIRMWARE
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE
             case 0x34:                         
                 ts->hasF34 = true;
                 ts->f34.data_offset  = fd.dataBase;                    
@@ -972,6 +1232,270 @@ static void t1320_report_buttons(struct input_dev *dev,
 	}
 }
 
+static void t1320_work_reset_func(struct work_struct *work)
+{
+	struct t1320  * ts ;
+ 	ts = (struct t1320 *)g_client->dev.platform_data; 
+
+      /*if disable power reset,return directly*/
+	if(0 == power_reset_enable)
+		return ;
+	if(i2c_smbus_read_byte_data(g_client,0x00) < 0){
+		/*if i2c communication has problem, power up reset touchcreen chip */
+		if(power_reset_cnt < MAX_POWERRESET_NUM){
+			printk(KERN_ERR "%s:touchscreen i2c has problem and power up reset it\n", __func__);
+			ts->chip_poweron_reset() ; 
+			power_reset_cnt++;
+		}
+	}else{
+		power_reset_cnt = 0 ;
+	}
+}
+
+/**
+ * Minimum sample count that should be collected before filtering begin.
+ */
+#define MIN_SAMPLE   5
+
+/**
+ * Maximum sample count that should be kept in history.
+ */
+#define SAMPLE_SIZE 10
+
+#if SAMPLE_SIZE > MAX_SAMPLE
+#error "SAMPLE_SIZE > MAX_SAMPLE"
+#endif
+
+#if MIN_SAMPLE > MAX_SAMPLE
+#error "MIN_SAMPLE > MAX_SAMPLE"
+#endif
+
+/**
+ * MediaPad screen is 1280x800 pixels, and the touchscreen controller
+ * is 3015x1892. So you get 2.365 touchscreen unit for each screen pixel.
+ */
+
+/**
+ * Sampled touches outside FILTER_RADIUS won't be used for filtering,
+ * and will be discarded.
+ */
+#define FILTER_RADIUS 95 /* 40 pixels * 2.365 */
+
+/**
+ * How far should a touch move before it will be considered as a swipe.
+ */
+#define TOUCH_THRES   10 /* 4 pixels * 2.365 */
+
+/**
+ * Minimum distance between swipe.
+ */
+#define SWIPE_THRES    3 /* 1 pixel * 2.365 */
+
+struct my_attribute {
+	struct kobj_attribute attr;
+	int *value;
+	int (*validator)(int);
+};
+
+static ssize_t my_attribute_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf);
+static ssize_t my_attribute_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count);
+
+#define DECL_ATTR(_name, _default, _validator) \
+	static int _name = _default; \
+	static struct my_attribute _name##_attr = { \
+		.attr.attr.name = __stringify(_name), \
+		.attr.attr.mode = 0666, \
+		.attr.show	= my_attribute_show, \
+		.attr.store = my_attribute_store, \
+		.value = &_name, \
+		.validator = _validator, \
+	}
+
+static int is_positive(int val)
+{
+	return val >= 0;
+}
+
+static int is_valid_sample(int val)
+{
+	return val > 0 && val <= MAX_SAMPLE;
+}
+
+DECL_ATTR(filter_radius, FILTER_RADIUS, is_positive);
+DECL_ATTR(touch_thres,   TOUCH_THRES,   is_positive);
+DECL_ATTR(swipe_thres,   SWIPE_THRES,   is_positive);
+DECL_ATTR(sample_size,   SAMPLE_SIZE,   is_valid_sample);
+DECL_ATTR(min_sample,    MIN_SAMPLE,    is_valid_sample);
+
+static inline void reset_finger(struct f11_finger_data *finger)
+{
+	finger->sample_index = 0;
+	finger->sample_count = 0;
+	finger->report_count = 0;
+	finger->x_sum = 0;
+	finger->y_sum = 0;
+	finger->z_sum = 0;
+}
+
+static ssize_t my_attribute_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct my_attribute *my = container_of(attr, struct my_attribute, attr);
+	return sprintf(buf, "%d\n", *my->value);
+}
+
+static ssize_t my_attribute_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct my_attribute *my = container_of(attr, struct my_attribute, attr);
+	struct t1320 *ts = (struct t1320 *) g_client->dev.platform_data;
+	int tmp, f;
+	if (sscanf(buf, "%d", &tmp) != 1 || !my->validator(tmp))
+		return -EINVAL;
+	*my->value = tmp;
+
+	if (min_sample > sample_size)
+		min_sample = sample_size;
+
+	for (f = 0; f < ts->f11.points_supported; ++f) {
+		struct f11_finger_data *finger = &ts->f11_fingers[f];
+		reset_finger(finger);
+	}
+
+	return strnlen(buf, count);
+}
+
+static int init_filter_sysfs(void)
+{
+	int i;
+	struct kobject *kobj;
+	struct my_attribute *attrs[] = {
+		&filter_radius_attr,
+		&touch_thres_attr,
+		&swipe_thres_attr,
+		&sample_size_attr,
+		&min_sample_attr,
+		0
+	};
+ 
+	kobj = kobject_create_and_add("t1320", NULL);
+	if (kobj == NULL) {
+		printk(KERN_ERR "kobject_create_and_add() error");
+		return -1;
+	}
+	for (i = 0; attrs[i]; i++) {
+		if (sysfs_create_file(kobj, &attrs[i]->attr.attr)) {
+			kobject_put(kobj);
+			printk("sysfs_create_file() error");
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static void add_sample(struct f11_finger_data *finger, int status, int x, int y, int z, int wx, int wy)
+{
+	if (z == 0)
+		status = 0;
+
+	if (!finger->status && status)
+		reset_finger(finger);
+	if (finger->status != status)
+		finger->dirty = 1;
+
+	finger->status = status;
+	if (status) {
+		int i, dx, dy, dist;
+		// Remove samples outside filter radius
+		while (finger->sample_count > 0) {
+			i = finger->sample_index - finger->sample_count;
+			if (i < 0)
+				i += sample_size;
+
+			dx = x - finger->x[i];
+			dy = y - finger->y[i];
+			dist = dx * dx + dy * dy;
+			if (dist <= filter_radius * filter_radius)
+				break;
+
+			finger->x_sum -= finger->x[i];
+			finger->y_sum -= finger->y[i];
+			finger->z_sum -= finger->z[i];
+			finger->sample_count--;
+			finger->dirty = 1;
+		}
+
+		i = finger->sample_index;
+		finger->sample_index = i + 1 < sample_size ? i + 1 : 0;
+		if (finger->sample_count < sample_size) {
+			finger->sample_count++;
+		} else {
+			finger->x_sum -= finger->x[i];
+			finger->y_sum -= finger->y[i];
+			finger->z_sum -= finger->z[i];
+		}
+
+		finger->x[i] = x;
+		finger->y[i] = y;
+		finger->z[i] = z;
+
+		finger->x_sum += x;
+		finger->y_sum += y;
+		finger->z_sum += z;
+
+		i = finger->sample_count;
+		finger->x_avg = finger->x_sum / i;
+		finger->y_avg = finger->y_sum / i;
+		finger->z_avg = finger->z_sum / i;
+
+		if (finger->sample_count >= min_sample) {
+			dx = finger->x_avg - finger->x_last;
+			dy = finger->y_avg - finger->y_last;
+			dist = dx * dx + dy * dy;
+			if (finger->report_count == 1) {
+				if (dist >= touch_thres * touch_thres)
+					finger->dirty = 1;
+			} else {
+				if (dist >= swipe_thres * swipe_thres)
+					finger->dirty = 1;
+			}
+		}
+	}
+}
+
+static void report_finger(struct t1320 *ts, struct f11_finger_data *finger)
+{
+	finger->dirty = 0;
+	if (finger->status) {
+#ifdef CONFIG_SYNA_MT
+		input_report_abs(ts->input_dev, ABS_MT_POSITION_X, finger->x_avg);
+		input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, finger->y_avg);
+		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, VALUE_ABS_MT_TOUCH_MAJOR);
+		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR, VALUE_ABS_MT_TOUCH_MINOR);
+		input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, finger->z_avg / 2);
+#endif
+
+#ifdef CONFIG_SYNA_MULTIFINGER
+		/* Report multiple fingers for software prior to 2.6.31 - not standard - uses special input.h */
+		input_report_abs(ts->input_dev, ABS_X_FINGER(f), finger->x_avg);
+		input_report_abs(ts->input_dev, ABS_Y_FINGER(f), finger->y_avg);
+		input_report_abs(ts->input_dev, ABS_Z_FINGER(f), finger->z_avg);
+#endif
+
+		finger->x_last = finger->x_avg;
+		finger->y_last = finger->y_avg;
+		finger->z_last = finger->z_avg;
+
+		finger->report_count++;
+	}
+
+#ifdef CONFIG_SYNA_MT
+	input_mt_sync(ts->input_dev);
+#endif
+}
+
 static void t1320_work_func(struct work_struct *work)
 {
 	int ret;
@@ -979,8 +1503,11 @@ static void t1320_work_func(struct work_struct *work)
 	u32 wx = 0, wy = 0;
 	u32 x = 0, y = 0;
 
-	struct t1320 *ts = container_of(work,
-											 struct t1320, work);
+	struct t1320 *ts = container_of(work,struct t1320, work);
+
+	/*disable power reset when process point report*/
+	power_reset_enable = 0 ;
+
 	ret = i2c_transfer(ts->client->adapter, ts->data_i2c_msg, 2);
 
 	if (ret < 0) {
@@ -989,108 +1516,73 @@ static void t1320_work_func(struct work_struct *work)
 		__u8 *interrupt = &ts->data[ts->f01.data_offset + 1];
 		if (ts->hasF11 && interrupt[ts->f11.interrupt_offset] & ts->f11.interrupt_mask) {
 			__u8 *f11_data = &ts->data[ts->f11.data_offset];
-			int f;
+			int f, dirty = 0;
 			__u8 finger_status_reg = 0;
 			__u8 fsr_len = (ts->f11.points_supported + 3) / 4;
-			__u8 finger_status;            
+			__u8 finger_status;
 
-            /* bengin: modify by liyaobing 2011/1/6 */
-            finger_num = 0;
 			for (f = 0; f < ts->f11.points_supported; ++f) {			
-				if (!(f % 4))
-					finger_status_reg = f11_data[f / 4];
-				finger_status = (finger_status_reg >> ((f % 4) * 2)) & 3;
-                finger_num += (finger_status == 1 || finger_status == 2) ? 1:0 ;
-            }            
-            
-            if(finger_num == 0){
-                ts_update_pen_state(ts, 0, 0, 0, 0, 0);                
-            }else{           
+				struct f11_finger_data *finger = &ts->f11_fingers[f];
+				__u8 reg = fsr_len + 5 * f;
+				__u8 *finger_reg = &f11_data[reg];
+				
+				if (!(f & 3))
+					finger_status_reg = f11_data[f >> 2];
+				finger_status = (finger_status_reg >> ((f & 3) << 1)) & 3;
+
+				x = (finger_reg[0] << 4) | (finger_reg[2] & 15);
+				y = (finger_reg[1] << 4) | (finger_reg[2] >> 4);
+				wx = finger_reg[3] & 15;
+				wy = finger_reg[3] >> 4;
+				z = finger_reg[4];
+
+				add_sample(finger, finger_status, x, y, z, wx, wy);
+				if (finger->dirty)
+					dirty = 1;
+			}
+
+			if (dirty) {
 				for (f = 0; f < ts->f11.points_supported; ++f) {
-
-					if (!(f % 4))
-						finger_status_reg = f11_data[f / 4];
-
-					finger_status = (finger_status_reg >> ((f % 4) * 2)) & 3;
-	               
-					if (finger_status == 1 || finger_status == 2) {
-						__u8 reg = fsr_len + 5 * f;
-						__u8 *finger_reg = &f11_data[reg];
-
-						x = (finger_reg[0] * 0x10) | (finger_reg[2] % 0x10);
-						y = (finger_reg[1] * 0x10) | (finger_reg[2] / 0x10);
-						wx = finger_reg[3] % 0x10;
-						wy = finger_reg[3] / 0x10;
-						z = finger_reg[4];
-
-		                if (KEYPAD_AREA(x, y, HOME)) {
-                          	/* bengin: modify by liyaobing 20110107 for eliminating the jitter of keys */
-                          	if(!(touch_state & TOUCH_HOME)){
-				                input_report_key(ts->input_dev, KEY_HOME, 1);           
-				                touch_state |= TOUCH_HOME;
-                            }                            
-		                } else if (KEYPAD_AREA(x, y, MENU)) {
-		                	if(!(touch_state & TOUCH_MENU)){
-								input_report_key(ts->input_dev, KEY_MENU, 1);           
-				                touch_state |= TOUCH_MENU;
-                            }                            
-						} else if (KEYPAD_AREA(x, y, BACK)) {							
-							if(!(touch_state & TOUCH_BACK)){
-								input_report_key(ts->input_dev, KEY_BACK, 1);           
-				                touch_state |= TOUCH_BACK;
-                            } 
-						} else {
-	                        ts_update_pen_state(ts, x, y, z, wx, wy);
-							touch_state |= TOUCH_PEN;
-
-#ifdef CONFIG_SYNA_MULTIFINGER
-							/* Report multiple fingers for software prior to 2.6.31 - not standard - uses special input.h */
-							input_report_abs(ts->input_dev, ABS_X_FINGER(f), x);
-							input_report_abs(ts->input_dev, ABS_Y_FINGER(f), y);
-							input_report_abs(ts->input_dev, ABS_Z_FINGER(f), z);
-#endif
-
-							ts->f11_fingers[f].status = finger_status;
-						}
-	            	}
-	            }
-            }
-                
-				/* f == ts->f11.points_supported */
-				/* set f to offset after all absolute data */
-				f = (f + 3) / 4 + f * 5;
-				if (ts->f11_has_relative) {
-					/* NOTE: not reporting relative data, even if available */
-					/* just skipping over relative data registers */
-					f += 2;
+					struct f11_finger_data *finger = &ts->f11_fingers[f];
+					report_finger(ts, finger);
 				}
+			}
 
-	            if (ts->hasEgrPalmDetect) {
-	                         	input_report_key(ts->input_dev,
-					                 BTN_DEAD,
-					                 f11_data[f + EGR_PALM_DETECT_REG] & EGR_PALM_DETECT);
-				}
+			/* f == ts->f11.points_supported */
+			/* set f to offset after all absolute data */
+			f = (f + 3) / 4 + f * 5;
+			if (ts->f11_has_relative) {
+				/* NOTE: not reporting relative data, even if available */
+				/* just skipping over relative data registers */
+				f += 2;
+			}
 
-	            if (ts->hasEgrFlick) {
-	                         	if (f11_data[f + EGR_FLICK_REG] & EGR_FLICK) {
-						input_report_rel(ts->input_dev, REL_X, f11_data[f + 2]);
-						input_report_rel(ts->input_dev, REL_Y, f11_data[f + 3]);
-					}
-				}
+			if (ts->hasEgrPalmDetect) {
+				input_report_key(ts->input_dev,
+						BTN_DEAD,
+						f11_data[f + EGR_PALM_DETECT_REG] & EGR_PALM_DETECT);
+			}
 
-	            if (ts->hasEgrSingleTap) {
-					input_report_key(ts->input_dev,
-					                 BTN_TOUCH,
-					                 f11_data[f + EGR_SINGLE_TAP_REG] & EGR_SINGLE_TAP);
+			if (ts->hasEgrFlick) {
+				if (f11_data[f + EGR_FLICK_REG] & EGR_FLICK) {
+					input_report_rel(ts->input_dev, REL_X, f11_data[f + 2]);
+					input_report_rel(ts->input_dev, REL_Y, f11_data[f + 3]);
 				}
+			}
 
-	            if (ts->hasEgrDoubleTap) {
-					input_report_key(ts->input_dev,
-					                 BTN_TOOL_DOUBLETAP,
-					                 f11_data[f + EGR_DOUBLE_TAP_REG] & EGR_DOUBLE_TAP);
-				}
-			}            
-            
+			if (ts->hasEgrSingleTap) {
+				input_report_key(ts->input_dev,
+						BTN_TOUCH,
+						f11_data[f + EGR_SINGLE_TAP_REG] & EGR_SINGLE_TAP);
+			}
+
+			if (ts->hasEgrDoubleTap) {
+				input_report_key(ts->input_dev,
+						BTN_TOOL_DOUBLETAP,
+						f11_data[f + EGR_DOUBLE_TAP_REG] & EGR_DOUBLE_TAP);
+			}
+		}            
+
 		if (ts->hasF19 && interrupt[ts->f19.interrupt_offset] & ts->f19.interrupt_mask) {
 			int reg;
 			int touch = 0;
@@ -1099,35 +1591,78 @@ static void t1320_work_func(struct work_struct *work)
 					touch = 1;
 					break;
 				}
-            }
+			}
 			input_report_key(ts->input_dev, BTN_DEAD, touch);
 
 #ifdef  CONFIG_SYNA_BUTTONS
 			t1320_report_buttons(ts->input_dev,
-			                         &ts->data[ts->f19.data_offset],
-                                                 ts->f19.points_supported, BTN_F19);
+					&ts->data[ts->f19.data_offset],
+					ts->f19.points_supported, BTN_F19);
 #endif
 
 #ifdef  CONFIG_SYNA_BUTTONS_SCROLL
 			t1320_report_scroll(ts->input_dev,
-			                        &ts->data[ts->f19.data_offset],
-			                        ts->f19.points_supported,
-			                        SCROLL_ORIENTATION);
+					&ts->data[ts->f19.data_offset],
+					ts->f19.points_supported,
+					SCROLL_ORIENTATION);
 #endif
 		}
 
 		if (ts->hasF30 && interrupt[ts->f30.interrupt_offset] & ts->f30.interrupt_mask) {
 			t1320_report_buttons(ts->input_dev,
-			                         &ts->data[ts->f30.data_offset],
-		                                 ts->f30.points_supported, BTN_F30);
+					&ts->data[ts->f30.data_offset],
+					ts->f30.points_supported, BTN_F30);
 		}
 		input_sync(ts->input_dev);
+#ifdef CONFIG_DEBUG_T1320_FIRMWARE
+		if ( 1 == flag_enable_ta){
+			if(true == flag_first_point){
+				getnstimeofday(&time_tp.time_first_end);
+				flag_first_point = false ;								
+			}
+
+			if(true == flag_last_point){
+				getnstimeofday(&time_tp.time_last_end);
+				flag_last_point = false ;	
+				flag_first_point = true ;  
+
+				time_tp.time_first_start.tv_nsec /=  NSEC_PER_USEC;
+				time_tp.time_first_end.tv_nsec /=  NSEC_PER_USEC;
+				time_tp.time_last_end.tv_nsec /=  NSEC_PER_USEC;	
+			}
+		}
+#endif	
+	}
+
+	/*if chip report exception detectde power up reset touchscreent*/
+	if( 0x03 ==  (i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_data0) & 0x07)){
+		if (i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_data0+1) & 0x02){
+			printk(KERN_ERR "%s: t1320 chip detect exception and will power up reset it\n", __func__);
+			ts->chip_poweron_reset() ; 
+		}
 	}
 
 	if (ts->use_irq){
-		enable_irq(ts->client->irq);
 		t1320_attn_clear(ts);
-    }
+		enable_irq(ts->client->irq);
+
+	}
+	/*disable power reset after process point report*/
+	power_reset_enable = 1 ;
+	if(debug_level >= 3)
+		printk("%s:exit t1320 work func\n",__func__);
+}
+
+static enum hrtimer_restart t1320_timer_reset_func(struct hrtimer *timer)
+{
+	struct t1320 *ts = container_of(timer, \
+					struct t1320, timer_reset);
+
+	queue_work(t1320_wq_reset, &ts->work_reset);
+
+	hrtimer_start(&ts->timer_reset, ktime_set(2, 0), HRTIMER_MODE_REL);
+
+	return HRTIMER_NORESTART;
 }
 
 static enum hrtimer_restart t1320_timer_func(struct hrtimer *timer)
@@ -1145,10 +1680,20 @@ static enum hrtimer_restart t1320_timer_func(struct hrtimer *timer)
 irqreturn_t t1320_irq_handler(int irq, void *dev_id)
 {
 	struct t1320 *ts = dev_id;
-
+	int ret ;
+#ifdef CONFIG_DEBUG_T1320_FIRMWARE
+	if (1 == flag_enable_ta){
+		sensor_report_num ++ ;
+		if(true == flag_first_point){
+			sensor_report_num = 1 ;
+			getnstimeofday(&time_tp.time_first_start);
+		}
+	}
+#endif
 	disable_irq_nosync(ts->client->irq);
-	queue_work(t1320_wq, &ts->work);
-
+	ret = queue_work(t1320_wq, &ts->work);
+     if(debug_level >= 3)
+		printk("%s:irq handler ret=%d\n",__func__,ret);
 	return IRQ_HANDLED;
 }
 
@@ -1168,9 +1713,9 @@ static void t1320_disable(struct t1320 *ts)
 		disable_irq_nosync(ts->client->irq);
 	else
 		hrtimer_cancel(&ts->timer);
-
-	cancel_work_sync(&ts->work);
-
+	
+	cancel_work_sync(&ts->work_reset);
+	  cancel_work_sync(&ts->work);
 	ts->enable = 0;
 }
 
@@ -1245,9 +1790,13 @@ static int t1320_probe(struct i2c_client *client,
 	int ret = 0;
 
 	struct t1320 *ts;
+    /* start: added by liyaobing 00169718 for MMI test 20110105 */
     struct kobject *kobj = NULL;
+    /* end: added by liyaobing 00169718 for MMI test 20110105 */
 	printk(KERN_ERR "t1320 device %s at $%02X...\n", client->name, client->addr);
 
+        g_client = client;  
+		
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		printk(KERN_ERR "%s: need I2C_FUNC_I2C\n", __func__);
 		ret = -ENODEV;
@@ -1257,12 +1806,16 @@ static int t1320_probe(struct i2c_client *client,
 
 	ts = (struct t1320 *)client->dev.platform_data; 
 	INIT_WORK(&ts->work, t1320_work_func);
+	INIT_WORK(&ts->work_reset, t1320_work_reset_func);
 	ts->client = client;
+	ts->client ->adapter->retries = 3 ;
 	i2c_set_clientdata(client, ts);
+    
 	if (ts->init_platform_hw) {
 		if ((ts->init_platform_hw()) < 0)
 	        goto init_platform_failed;
     }
+    
     mdelay(50); 
 
 	ret = t1320_attn_clear(ts);
@@ -1285,6 +1838,7 @@ static int t1320_probe(struct i2c_client *client,
 		goto err_alloc_dev_failed;
 	}
 
+    /* begin: added by huangzhikui for scaling axis 2010/12/25 */
     /* convert touchscreen coordinator to coincide with LCD coordinator */
     /* get tsp at (0,0) */
 	ts->input_dev->name = "t1320";
@@ -1294,10 +1848,6 @@ static int t1320_probe(struct i2c_client *client,
 //	set_bit(EV_SYN, ts->input_dev->evbit);
 	set_bit(EV_KEY, ts->input_dev->evbit);
 
-	set_bit(ABS_X, ts->input_dev->absbit);
-    set_bit(ABS_Y, ts->input_dev->absbit);
-    set_bit(ABS_PRESSURE, ts->input_dev->absbit);
-
    	set_bit(KEY_HOME, ts->input_dev->keybit);
 	set_bit(KEY_MENU, ts->input_dev->keybit);
    	set_bit(KEY_BACK, ts->input_dev->keybit);
@@ -1306,32 +1856,16 @@ static int t1320_probe(struct i2c_client *client,
 	ts->y_max = TOUCH_LCD_Y_MAX;
 	if (ts->hasF11) {
 		for (i = 0; i < ts->f11.points_supported; ++i) {
-#ifdef CONFIG_SYNA_MOUSE
-			/* old standard touchscreen for single-finger software */
-			input_set_abs_params(ts->input_dev, ABS_X, 0, ts->x_max, 0, 0);
-			input_set_abs_params(ts->input_dev, ABS_Y, 0, ts->y_max, 0, 0);
-			input_set_abs_params(ts->input_dev, ABS_PRESSURE, 0, 0xFF, 0, 0);
-			input_set_abs_params(ts->input_dev, ABS_TOOL_WIDTH, 0, 0xF, 0, 0);
-			set_bit(BTN_TOUCH, ts->input_dev->keybit);
-#endif
-
 #ifdef CONFIG_SYNA_MT
-			/* Linux 2.6.31 multi-touch */
-			input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID, 1,
-								 ts->f11.points_supported, 0, 0);
-
 			/* begin: added by z00168965 for multi-touch */
 			input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0, ts->x_max, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0, ts->y_max, 0, 0);
 			/* end: added by z00168965 for multi-touch */
-
             input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 0xF, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MINOR, 0, 0xF, 0, 0);
-			input_set_abs_params(ts->input_dev, ABS_MT_ORIENTATION, 0, 1, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_MT_WIDTH_MAJOR, 0, 0xFF, 0, 0);
 #endif
-
-#ifdef CONFIG_SYNA_MULTIFINGER
+#ifdef CONFIG_SYNA_MULTIFINGER			
 			/*  multiple fingers for software built prior to 2.6.31 - uses non-standard input.h file. */
 			input_set_abs_params(ts->input_dev, ABS_X_FINGER(i), 0, ts->f11_max_x, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_Y_FINGER(i), 0, ts->f11_max_y, 0, 0);
@@ -1377,7 +1911,7 @@ static int t1320_probe(struct i2c_client *client,
 	if (client->irq) {
 		printk(KERN_INFO "Requesting IRQ...\n");
 		ret = request_irq(client->irq, t1320_irq_handler,
-				IRQF_TRIGGER_LOW,  client->name, ts);
+				IRQF_TRIGGER_LOW, client->name, ts);
 
 		if(ret) {
 			printk(KERN_ERR "Failed to request IRQ!ret = %d\n", ret);          		
@@ -1389,12 +1923,14 @@ static int t1320_probe(struct i2c_client *client,
 	}
 
 	if (!ts->use_irq) {
-		printk(KERN_ERR "t1320  device %s in polling mode\n", client->name);
 		hrtimer_init(&ts->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		ts->timer.function = t1320_timer_func;
 		hrtimer_start(&ts->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
 	}
-
+	hrtimer_init(&ts->timer_reset, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	ts->timer_reset.function = t1320_timer_reset_func;
+	/*set 2s time out */
+	hrtimer_start(&ts->timer_reset, ktime_set(2, 0), HRTIMER_MODE_REL);
 	/*
 	 * Device will be /dev/input/event#
 	 * For named device files, use udev
@@ -1408,6 +1944,7 @@ static int t1320_probe(struct i2c_client *client,
 		printk("t1320 input device registered\n");
 	}
 
+
 	ts->enable = 1;
 	dev_set_drvdata(&ts->input_dev->dev, ts);
 
@@ -1415,11 +1952,14 @@ static int t1320_probe(struct i2c_client *client,
 		printk("failed to create sysfs file for input device\n");
 
 	#ifdef CONFIG_HAS_EARLYSUSPEND
-	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 1;
 	ts->early_suspend.suspend = t1320_early_suspend;
 	ts->early_suspend.resume = t1320_late_resume;
+ 	/* begin: add by liyaobing l00169718 20110210 for t1320 sleep mode */
     register_early_suspend(&ts->early_suspend);
+    /* end: add by liyaobing l00169718 20110210 for t1320 sleep mode */
 	#endif
+    /* start: added by liyaobing 00169718 for MMI test 20110105 */
     kobj = kobject_create_and_add("cap_touchscreen", NULL);
   	if (kobj == NULL) {	
 		printk(KERN_ERR "kobject_create_and_add error\n" );
@@ -1432,25 +1972,39 @@ static int t1320_probe(struct i2c_client *client,
 	}
 
     g_tm1771_dect_flag = 1;
+    /* end: added by liyaobing 00169718 for MMI test 20110105 */
 
-#ifdef CONFIG_UPDATE_TS_FIRMWARE 
-         g_client = client;  
+		if (init_filter_sysfs() != 0)
+			goto err_input_register_device_failed;
+
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE  
          ts_firmware_file();
+	 t1320_tm1771_read_PDT(g_client);
 #endif
+#ifdef CONFIG_DEBUG_T1320_FIRMWARE
+	flag_first_point = true ;
+	flag_last_point = false ;
+	flag_enable_ta = 0 ;
+#endif
+	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 2, 0x3);
+	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 3, 0x3);
 	return 0;
 
 err_input_register_device_failed:
+	if (!ts->use_irq) {
+		hrtimer_cancel(&ts->timer);
+	}
+	hrtimer_cancel(&ts->timer_reset);
 	input_free_device(ts->input_dev);
 
 err_alloc_dev_failed:
 err_pdt_read_failed:
-    if (ts->exit_platform_hw)
-		ts->exit_platform_hw();
+        if (ts->exit_platform_hw)
+            ts->exit_platform_hw();
 init_platform_failed:
 err_check_functionality_failed:
 	return ret;
 }
-
 
 static int t1320_remove(struct i2c_client *client)
 {
@@ -1463,9 +2017,13 @@ struct t1320 *ts = i2c_get_clientdata(client);
 	else
 		hrtimer_cancel(&ts->timer);
 
+	hrtimer_cancel(&ts->timer_reset);
+
 	input_unregister_device(ts->input_dev);
+   
     if (ts->exit_platform_hw)
 		ts->exit_platform_hw();
+    
 	kfree(ts);
     
 	return 0;
@@ -1475,29 +2033,71 @@ static int t1320_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	struct t1320 *ts = i2c_get_clientdata(client);
     int ret=0;
-    
+	
+	hrtimer_cancel(&ts->timer_reset);
+	 /*disable power reset when system suspend */
+	power_reset_enable = 0 ;
+
     /*Enter sleep mode*/
     ret = i2c_smbus_read_byte_data(client,f01_rmi_ctrl0);
     ret = (ret | 1) & (~(1 << 1)) ;
     i2c_smbus_write_byte_data(client,f01_rmi_ctrl0,ret);
-	t1320_disable(ts);
-    
+    t1320_attn_clear(ts);
+    t1320_disable(ts);
+    if (ts->use_irq)
+        free_irq(client->irq, ts);
+        if(0 == is_upgrade_firmware){
+          ts->chip_poweroff() ; 
+	   msm_gpiomux_put(GPIO_CTP_POWER);
+          msm_gpiomux_put(GPIO_CTP_INT);   
+	   msm_gpiomux_put(GPIO_CTP_RESET);  
+       }
 	return 0;
 }
 
 static int t1320_resume(struct i2c_client *client)
 {
 	struct t1320 *ts = i2c_get_clientdata(client);
+    /* begin: add by liyaobing l00169718 20110210 for t1320 sleep mode */
     int ret=0;
-    
-	t1320_enable(ts);
+    /* end: add by liyaobing l00169718 20110210 for t1320 sleep mode */
+	 if(0 == is_upgrade_firmware){
+    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
+       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
+	    if(i2c_smbus_read_byte_data(g_client,0x00) < 0){
+	        msm_gpiomux_get(GPIO_CTP_POWER);
+	        msm_gpiomux_get(GPIO_CTP_INT);   
+	        msm_gpiomux_get(GPIO_CTP_RESET);  
+	        ts->chip_poweron() ; 
+    	    }  
+	 }
+    if (client->irq) {
+		printk(KERN_INFO "Requesting IRQ...\n");
+		ret = request_irq(client->irq, t1320_irq_handler,
+				IRQF_TRIGGER_LOW,  client->name, ts);
 
+		if(ret) {
+			printk(KERN_ERR "Failed to request IRQ!ret = %d\n", ret);          		
+		}else {
+			printk(KERN_INFO "Set IRQ Success!\n");
+            		ts->use_irq = 1;
+		}
+
+	}
+    t1320_attn_clear(ts);
+
+    /*begin: add by liyaobing l00169718 20110210 for t1320 sleep mode */
     /*Enter normal mode*/
-    /*begin: DTS2011022400290 modify by liyaobing l00169718 for floating register firmware update 20110401*/
     ret = i2c_smbus_read_byte_data(client,f01_rmi_ctrl0);
     ret &=  ~(0x03);
     i2c_smbus_write_byte_data(client,f01_rmi_ctrl0,ret);
-    
+	/*end: add by liyaobing l00169718 20110210 for t1320 sleep mode */
+
+	 /*enable power reset when system resume */
+	power_reset_enable = 1 ;
+	hrtimer_start(&ts->timer_reset, ktime_set(2, 0), HRTIMER_MODE_REL);
+	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 2, 0x3);
+	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 3, 0x3);
 	return 0;
 }
 
@@ -1542,7 +2142,11 @@ static int __devinit t1320_init(void)
 		printk(KERN_ERR "Could not create work queue t1320_wq: no memory");
 		return -ENOMEM;
 	}
-
+	t1320_wq_reset = create_singlethread_workqueue("t1320_wq_reset");
+	if (!t1320_wq_reset) {
+		printk(KERN_ERR "Could not create work queue t1320_wq_reset: no memory");
+		return -ENOMEM;
+	}
 	return i2c_add_driver(&t1320_driver);
 }
 
@@ -1552,6 +2156,8 @@ static void __exit t1320_exit(void)
 
 	if (t1320_wq)
 		destroy_workqueue(t1320_wq);
+	if (t1320_wq_reset)
+		destroy_workqueue(t1320_wq_reset);
 }
 
 module_init(t1320_init);

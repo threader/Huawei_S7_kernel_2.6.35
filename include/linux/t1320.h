@@ -9,12 +9,12 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
  * GNU General Public License for more details.
  *
  */
  
-#ifndef _LINUX_T1320_H  
+#ifndef _LINUX_T1320_H 
 #define _LINUX_T1320_H
 
 #include <linux/interrupt.h>  
@@ -47,15 +47,27 @@ enum f11_finger_status {
 	f11_finger_inaccurate = 2,
 };
 
+#define MAX_SAMPLE 32
+
 struct f11_finger_data {
 	enum f11_finger_status status;
 
-	u12 x;
-	u12 y;
-	u8 z;
-
 	unsigned int speed;
 	bool active;
+
+	u12 x[MAX_SAMPLE];
+	u12 y[MAX_SAMPLE];
+	u8 z[MAX_SAMPLE];
+
+	int x_sum, y_sum, z_sum;
+	int x_avg, y_avg, z_avg;
+	int x_last, y_last, z_last;
+
+	int sample_index;
+	int sample_count;
+	int report_count;
+
+	int dirty;
 };
 
 struct t1320 {
@@ -63,6 +75,8 @@ struct t1320 {
 	struct input_dev *input_dev;
 	int use_irq;
 	struct hrtimer timer;
+	struct hrtimer timer_reset;
+	struct work_struct  work_reset;
 	struct work_struct  work;
 	struct early_suspend early_suspend;
 
@@ -94,7 +108,7 @@ struct t1320 {
 
 	int hasF30;
 	struct rmi_function_info f30;
-#ifdef CONFIG_UPDATE_TS_FIRMWARE
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE
     int hasF34;
 	struct rmi_function_info f34;
 #endif 
@@ -103,22 +117,30 @@ struct t1320 {
 
 	unsigned int x_max;
 	unsigned int y_max;
-    struct timer_list timerlistkey;
+	struct timer_list timerlist;
+    struct timer_list timerlistkey;    
     int	(*init_platform_hw)(void);
-	void	(*exit_platform_hw)(void);
+	void (*exit_platform_hw)(void);
+	
+	int	(*interrupts_pin_status)(void);
+	int	(*chip_reset)(void);
+	int	(*chip_poweron_reset)(void);
+	int	(*chip_poweron)(void);
+	int	(*chip_poweroff)(void);
+	int (*config_tp_5v)(int enable);
 };
-
-#ifdef CONFIG_UPDATE_TS_FIRMWARE
+#ifdef CONFIG_UPDATE_T1320_FIRMWARE
+/* start: modify by liyaobing 00169718 for firmware update download 20110118 */
 #define firmware_attr(_name) \
 static struct kobj_attribute _name##_attr = {	\
 	.attr	= {				\
 		.name = __stringify(_name),	\
-		.mode = 0777,			\
+		.mode = 0664,			\
 	},					\
 	.show	= _name##_show,			\
 	.store	= _name##_store,		\
 }
+/* end: modify by liyaobing 00169718 for firmware update download 20110118 */
 #endif
-
 
 #endif /* _LINUX_T1320_H */

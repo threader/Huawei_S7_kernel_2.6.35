@@ -75,6 +75,28 @@
 
 struct i2c_client* bs300_i2c_client = NULL;
 
+static unsigned int bs300EnFlag = 0;
+#define WAKEUP_BS300_GPIO (103)
+void set_wakeup_bs300(int flag)
+{
+	int rc;
+
+	if (flag) {
+		rc = gpio_request(WAKEUP_BS300_GPIO, "wakeup_bs300");
+		if (rc) {
+			pr_err("%s: wakeup bs300 gpio %d request"
+			"failed\n", __func__, WAKEUP_BS300_GPIO);
+			return;
+		}
+		gpio_direction_output(WAKEUP_BS300_GPIO, 1);
+		gpio_set_value_cansleep(WAKEUP_BS300_GPIO, 1);
+	} else {
+		gpio_set_value_cansleep(WAKEUP_BS300_GPIO, 0);
+		gpio_free(WAKEUP_BS300_GPIO);
+	}
+}
+EXPORT_SYMBOL(set_wakeup_bs300);
+
 static unsigned int 
 bs300_send_receive( int sendCount, int receiveCount,
         unsigned char *pSendData, unsigned char *pReceiveData )
@@ -169,6 +191,8 @@ static unsigned int bs300_connect(void)
 		if((bs300_get_status(&statusWord) )&& 
 			((statusWord & STATUS_SECURITY_MODE) == STATUS_SECURITY_UNRESTRICTED))
 		{
+			
+			bs300EnFlag = 1;
 			break;
 		}
 		mdelay(15);	/*sleep 15 ms*/ 
@@ -177,6 +201,7 @@ static unsigned int bs300_connect(void)
 	if(i == maxRetryCount)		
 	{
 		BS300_ERR("[%s,%d] maximum retry exceeds\n",__FUNCTION__,__LINE__);
+		bs300EnFlag = 0;
 		return BS300_FAIL;
 	}
 	/*Stop DSP*/
@@ -243,8 +268,7 @@ static unsigned int bs300_download(void)
 							,__FUNCTION__,__LINE__,i,downloadBlocks[i].crc,receivedCrc);
 			return BS300_FAIL;
 		}	
-		
-		
+		usleep(1);		
 	}
 
 	return BS300_SUCCESS;
@@ -291,11 +315,26 @@ static unsigned int bs300_run(void)
 /**
  * I2C kernel driver module
  */
+
+static ssize_t bs300_attr_show(struct kobject *kobj, struct kobj_attribute *attr,
+        char *buf)
+ {
+//#ifndef CONFIG_WITH_ECHO_CANCELLATION
+	//	bs300EnFlag = 0;
+//#endif
+     return sprintf(buf, "%d", bs300EnFlag);
+ }
 static int bs300_probe(struct i2c_client *client,
 				 const struct i2c_device_id *id)
 {
 	int retval = 0;
 	unsigned int uiRet=0;
+
+	msleep(15);
+	/*wakeup bs300*/
+	set_wakeup_bs300(1);
+	mdelay(1);
+
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		BS300_ERR("[%s,%d]: need I2C_FUNC_I2C\n",__FUNCTION__,__LINE__);
 		return -ENODEV;
@@ -332,6 +371,8 @@ static int bs300_probe(struct i2c_client *client,
 
 bs300_failed_0:
 
+	set_wakeup_bs300(0);
+	msleep(15);						
 	return retval;
 }
 
@@ -356,13 +397,42 @@ static struct i2c_driver bs300_driver = {
 	.id_table = bs300_id,
 };
 
+
+ static struct kobj_attribute bs300_attribute =
+         __ATTR(switch, 0664, bs300_attr_show, NULL);
+
+ static struct attribute* bs300_attributes[] =
+ {
+         &bs300_attribute.attr,
+         NULL
+ };
+
+ static struct attribute_group bs300_defattr_group =
+ {
+         .attrs = bs300_attributes,
+ };
+
 static int __init bs300_init(void)
 {
 	int ret;
+	struct kobject *kobj = NULL;
 
 	ret = i2c_add_driver(&bs300_driver);
 	if (ret)
 		BS300_ERR("Unable to register BS300 driver\n");
+
+	
+	kobj = kobject_create_and_add("bs300_en", NULL);
+    if (kobj == NULL) 
+    {
+        return ret;
+    }
+    if (sysfs_create_group(kobj, &bs300_defattr_group)) 
+    {
+        kobject_put(kobj);
+        return ret;
+    }
+	
 
 	return ret;
 }

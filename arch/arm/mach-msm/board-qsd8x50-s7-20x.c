@@ -2118,7 +2118,7 @@ static struct i2c_board_info msm_i2c_board_info[] __initdata = {
 };
 
 static struct i2c_board_info gpio_i2c_board_info[] __initdata = {
-#if defined(CONFIG_BELASIGNA_BS300)||defined(CONFIG_BELASIGNA_BS300_MODULE)
+#if defined(CONFIG_BELASIGNA_BS300) || defined(CONFIG_BELASIGNA_BS300_MODULE)
 	{
 		I2C_BOARD_INFO("bs300-audio",0x60),
 	},

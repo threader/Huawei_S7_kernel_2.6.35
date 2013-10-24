@@ -60,4 +60,6 @@
 #define BS300_I2C_NACK			0
 #define BS300_SUCCESS			1
 #define BS300_FAIL				0
+
+void set_wakeup_bs300(int flag);
 #endif

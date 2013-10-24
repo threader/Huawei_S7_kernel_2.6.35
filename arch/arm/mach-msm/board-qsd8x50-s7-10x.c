@@ -2258,7 +2258,7 @@ static struct i2c_board_info msm_i2c_board_info[] __initdata = {
 #if defined(CONFIG_ACCELEROMETER_ST_L1S35DE) \
     || defined(CONFIG_ACCELEROMETER_ST_L1S35DE_MODULE)
 	{
-		I2C_BOARD_INFO("gs_st", 0x3A >> 1),   
+		I2C_BOARD_INFO("lis35de", 0x3A >> 1),   
 	   .irq = MSM_GPIO_TO_INT(22)
 	},
 #endif

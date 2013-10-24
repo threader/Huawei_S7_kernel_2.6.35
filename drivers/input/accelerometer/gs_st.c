@@ -634,7 +634,7 @@ static const struct i2c_device_id gs_id[] = {
 };
 
 static struct i2c_driver gs_driver = {
-	.probe		=gs_probe,
+	.probe		= gs_probe,
 	.remove		= gs_remove,
 #ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend	= gs_suspend,

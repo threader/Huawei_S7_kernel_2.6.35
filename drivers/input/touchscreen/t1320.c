@@ -126,6 +126,7 @@ struct t1320_function_descriptor {
 #define TOUCH_BACK		(1 << 2)
 #define TOUCH_PEN		(1 << 3)
 
+static int touch_state = 0;
 /* end: added by huangzhikui for scaling axis 2010/12/25 */
 
 /* start: added by liyaobing 00169718 for MMI test 20110105 */
@@ -962,6 +963,59 @@ void poweron_touchscreen(void){
  
 #endif
 
+static void ts_update_pen_state(struct t1320 *ts, int x, int y, int pressure, int wx, int wy)
+{
+
+	if (pressure) {
+#ifdef CONFIG_SYNA_MOUSE
+		input_report_abs(ts->input_dev, ABS_X, x);
+		input_report_abs(ts->input_dev, ABS_Y, y);
+		input_report_abs(ts->input_dev, ABS_PRESSURE, pressure);
+		input_report_key(ts->input_dev, BTN_TOUCH, !!pressure);
+#endif
+
+#ifdef CONFIG_SYNA_MT
+		input_report_abs(ts->input_dev, ABS_MT_POSITION_X, x);
+        input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, y);
+		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 4/*max(wx, wy)*/);
+		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR, 3/*min(wx, wy)*/);
+		input_report_abs(ts->input_dev, ABS_MT_ORIENTATION, (wx > wy ? 1 : 0));
+		input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, pressure/2);
+        input_mt_sync(ts->input_dev);
+#endif
+	} else {
+        /* begin: modify by liyaobing 2011/1/6 */
+		if (touch_state & TOUCH_PEN){
+#ifdef CONFIG_SYNA_MOUSE		
+			input_report_abs(ts->input_dev, ABS_PRESSURE, 0);
+			input_report_key(ts->input_dev, BTN_TOUCH, 0);
+#endif
+
+#ifdef CONFIG_SYNA_MT
+	        input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
+			input_mt_sync(ts->input_dev);
+#endif
+			touch_state &= ~TOUCH_PEN;
+		}
+
+        if (touch_state & TOUCH_HOME) {
+	        input_report_key(ts->input_dev, KEY_HOME, 0);
+	        touch_state &= ~TOUCH_HOME;
+		} 
+
+	    if (touch_state & TOUCH_MENU) {
+	        input_report_key(ts->input_dev, KEY_MENU, 0);
+	        touch_state &= ~TOUCH_MENU;
+		}
+
+	    if (touch_state & TOUCH_BACK) {
+	        input_report_key(ts->input_dev, KEY_BACK, 0);
+	        touch_state &= ~TOUCH_BACK;
+		}
+        /* end: modify by liyaobing 2011/1/6 */
+	}
+}
+
 static int t1320_read_pdt(struct t1320 *ts)
 {
 	int ret = 0;
@@ -1547,11 +1601,11 @@ static void t1320_work_func(struct work_struct *work)
 					finger_status_reg = f11_data[f >> 2];
 				finger_status = (finger_status_reg >> ((f & 3) << 1)) & 3;
 
-				x = (finger_reg[0] << 4) | (finger_reg[2] & 15);
-				y = (finger_reg[1] << 4) | (finger_reg[2] >> 4);
-				wx = finger_reg[3] & 15;
-				wy = finger_reg[3] >> 4;
-				z = finger_reg[4];
+						x = (finger_reg[0] * 0x10) | (finger_reg[2] % 0x10);
+						y = (finger_reg[1] * 0x10) | (finger_reg[2] / 0x10);
+						wx = finger_reg[3] % 0x10;
+						wy = finger_reg[3] / 0x10;
+						z = finger_reg[4];
 
 				add_sample(finger, finger_status, x, y, z, wx, wy);
 				if (finger->dirty)
@@ -1564,6 +1618,36 @@ static void t1320_work_func(struct work_struct *work)
 					report_finger(ts, finger);
 				}
 			}
+
+		                if (KEYPAD_AREA(x, y, HOME)) {
+                          	/* bengin: modify by liyaobing 20110107 for eliminating the jitter of keys */
+                          	if(!(touch_state & TOUCH_HOME)){
+				                input_report_key(ts->input_dev, KEY_HOME, 1);           
+				                touch_state |= TOUCH_HOME;
+                            }                            
+		                } else if (KEYPAD_AREA(x, y, MENU)) {
+		                	if(!(touch_state & TOUCH_MENU)){
+								input_report_key(ts->input_dev, KEY_MENU, 1);           
+				                touch_state |= TOUCH_MENU;
+                            }                            
+						} else if (KEYPAD_AREA(x, y, BACK)) {							
+							if(!(touch_state & TOUCH_BACK)){
+								input_report_key(ts->input_dev, KEY_BACK, 1);           
+				                touch_state |= TOUCH_BACK;
+                            } 
+						} else {
+	                        ts_update_pen_state(ts, x, y, z, wx, wy);
+							touch_state |= TOUCH_PEN;
+
+#ifdef CONFIG_SYNA_MULTIFINGER
+							/* Report multiple fingers for software prior to 2.6.31 - not standard - uses special input.h */
+							input_report_abs(ts->input_dev, ABS_X_FINGER(f), x);
+							input_report_abs(ts->input_dev, ABS_Y_FINGER(f), y);
+							input_report_abs(ts->input_dev, ABS_Z_FINGER(f), z);
+#endif
+
+							ts->f11_fingers[f].status = finger_status;
+						}
 
 			/* f == ts->f11.points_supported */
 			/* set f to offset after all absolute data */

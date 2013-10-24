@@ -301,7 +301,7 @@ po188_wait_for_event(struct work_struct *work)
 	//static bool autodect=0;	
 	int k;
 	int sum=0;
-    mod_timer(&po188_driver.timer, jiffies + SENSOR_POLLING_JIFFIES);
+    mod_timer(&po188_driver.timer, jiffies + MOD_SENSOR_POLLING_JIFFIES);
     po188_get_sensor_status();
 	po188_driver.voltage_now = po188_get_fsr(po188_driver.voltage_now);
 	voltage[i++%TIMES]=po188_driver.voltage_now;

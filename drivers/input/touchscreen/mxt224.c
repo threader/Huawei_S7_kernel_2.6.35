@@ -1154,7 +1154,6 @@ err_platform_hw:
     if (pdata->exit_platform_hw)
 		pdata->exit_platform_hw();
 err_hrtimer:
-	pdata->config_tp_5v(0);
 #if !defined(USE_WQ) && !defined(USE_NORMAL_TIMER)
 	hrtimer_cancel(&ts->hr_timer);
 #endif

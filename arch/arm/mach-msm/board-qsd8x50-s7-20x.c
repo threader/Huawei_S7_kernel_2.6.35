@@ -91,9 +91,7 @@
 #else
     #define MSM_FB_SIZE (800 * 480 * 4 * 2) + MSM_HDMI_SIZE
 #endif
-//#define MSM_FB_SIZE         0x2EE000
-#define MSM_FB_SIZE 0xD00000
-
+#define MSM_FB_SIZE			0xD00000
 #define MSM_AUDIO_SIZE		0x80000
 //#define MSM_GPU_PHYS_SIZE 	SZ_2M
 
@@ -1703,7 +1701,7 @@ static int ctp_gpio_setup(int enable)
 	int status = 0;
     
 	if (enable) {
- 		status = gpio_request(GPIO_CTP_POWER, "3v3_en");
+ 		status = gpio_request(GPIO_CTP_POWER, "ctp_power");
 		if (status) {
 			pr_err("%s:Failed to request GPIO %d\n",
 						__func__, GPIO_CTP_POWER);
@@ -1822,7 +1820,7 @@ static void ctp_exit_platform_hw(void)
 
 static int ctp_init_platform_hw(void)
 {
-	int rc = -ENODEV;
+	int rc = 0;
 
     rc = ctp_gpio_setup(1);
     if (rc < 0) 

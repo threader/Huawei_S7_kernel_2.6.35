@@ -121,13 +121,13 @@ struct t1320 {
     struct timer_list timerlistkey;    
     int	(*init_platform_hw)(void);
 	void (*exit_platform_hw)(void);
-	
+	/*
 	int	(*interrupts_pin_status)(void);
 	int	(*chip_reset)(void);
 	int	(*chip_poweron_reset)(void);
 	int	(*chip_poweron)(void);
 	int	(*chip_poweroff)(void);
-	int (*config_tp_5v)(int enable);
+	int (*config_tp_5v)(int enable);*/
 };
 #ifdef CONFIG_UPDATE_T1320_FIRMWARE
 /* start: modify by liyaobing 00169718 for firmware update download 20110118 */

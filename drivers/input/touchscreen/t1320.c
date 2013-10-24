@@ -161,91 +161,14 @@ static struct update_firmware_addr {
 /* start: added by liyaobing 00169718 for firmware update download 20110118 */
 //#define TOUCHSCREEN_TYPE "t1320_tm1828"
 #define TOUCHSCREEN_TYPE "t1320_tm1771"
-/* end: added by liyaobing 00169718 for firmware update download 20110118 */
-#ifdef CONFIG_DEBUG_T1320_FIRMWARE 
-#define FLAG_RR 			0x00
-#define FLAG_WR 		0x01
-#define FLAG_RPX 		0x02
-#define FLAG_RPY 		0x03
-#define FLAG_RNIT 		0x04
-#define FLAG_HRST 		0x05
-#define FLAG_SRST 		0x06
-#define FLAG_EINT 		0x07
-#define FLAG_DINT 		0x08
-/*tp file struct(bytes):
-	0:		RFLAG_ENABLE_TA
-	1~2:	RFLAG_REPORT_NUM
-	3~4:	RFLAG_RESEVER
-	5+LAYER_PTHASE_NUM*LAYER_PHASE_DATA_NUM ~ 5+((LAYER_PTHASE_NUM+1)*LAYER_PHASE_DATA_NUM-1): tp timing data
-*/
-#define FLAG_RTA 		0x09
-#define FLAG_PRST 		0x0a 
-#define FLAG_POFF 		0x0b 
-#define FLAG_EFW 		0x0c 
-#define FLAG_DBG 		0x11 
-enum  layer_phase
-{
-    LAYER_PTHASE_DRIVER = 0x0,
-    LAYER_PTHASE_EVENTHUB,
-    LAYER_PTHASE_DISPATCH,
-    MAX_LAYER_PTHASE,
-    WFLAG_ENABLE_TA = 0xFE,
-};
-enum  read_flag
-{
-    RFLAG_ENABLE_TA = 0x0,
-    RFLAG_REPORT_NUM,
-    RFLAG_RESEVER=RFLAG_REPORT_NUM+2,/*report num is 2 bytes*/
-    RFLAG_LAYER_PHASE_START = RFLAG_RESEVER+2/*resever 2 bytes for future use*/
-};
-#define  LAYER_PHASE_DATA_NUM	24 /* 24 = SIZEOF(time_tp) = 4*2*3 = 4:sizeof(long int) 2:tv_sec /tv_usec 3:time_first_start/time_first_end/time_last_end*/
-#define MAX_DATA_NUM  		RFLAG_LAYER_PHASE_START +MAX_LAYER_PTHASE*LAYER_PHASE_DATA_NUM
 
-char time_ta[MAX_DATA_NUM]={0};
-struct time_tp {
-	struct timespec  time_first_start; /* first point start time of one action phase*/
-	struct timespec  time_first_end;   /* first point end time of one action phase*/
-	struct timespec  time_last_end;   /* last point end time of one action phase*/
-};
-struct time_tp time_tp ;
-
-bool  flag_first_point;	 /* flag of whether it is first point */
-bool  flag_last_point;	 /* flag of whether it is last point */
-char flag_enable_ta = false ;
-unsigned short  sensor_report_num = 0 ;
-
-irqreturn_t t1320_irq_handler(int irq, void *dev_id);
-static void t1320_disable(struct t1320 *ts);
-static void t1320_enable(struct t1320 *ts);
-static int ts_debug_X = 0 ;
-static int ts_debug_Y = 0 ;
-static int debug_level = 0 ;
-static ssize_t ts_debug_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
-static ssize_t ts_debug_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
-
-firmware_attr(ts_debug);
-#endif
 static struct i2c_client *g_client = NULL;
 static ssize_t update_firmware_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
 static ssize_t update_firmware_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
-static ssize_t firmware_version_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
-static ssize_t firmware_version_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
-
-static ssize_t tp_control_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
-static ssize_t tp_control_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
-firmware_attr(tp_control);
-
 static int ts_firmware_file(void);
 static int i2c_update_firmware(struct i2c_client *client, const  char * filename); 
 
 firmware_attr(update_firmware);
-firmware_attr(firmware_version);
-
-#define F01_PRODUCTID_QUERY_OFFSET		11
-#define F01_PRODUCTID_SIZE					10
-static ssize_t firmware_tptype_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf);
-static ssize_t firmware_tptype_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count);
-firmware_attr(firmware_tptype);
 #endif
 
 /* start: added by liyaobing 00169718 for MMI test 20110105 */ 
@@ -664,235 +587,10 @@ static ssize_t cap_touchscreen_attr_show(struct kobject *kobj, struct kobj_attri
          printk("create file error\n");
          return -1;
      }
-     ret = sysfs_create_file(kobject_ts, &firmware_version_attr.attr);
-     if (ret) {
-         kobject_put(kobject_ts);
-         printk("create file error\n");
-         return -1;
-     }
-
-	ret = sysfs_create_file(kobject_ts, &tp_control_attr.attr);
-	if (ret) {
-	    kobject_put(kobject_ts);
-	    printk("create file error\n");
-	    return -1;
-	}
-
-#ifdef CONFIG_DEBUG_T1320_FIRMWARE 
-     ret = sysfs_create_file(kobject_ts, &ts_debug_attr.attr);
-     if (ret) {
-         kobject_put(kobject_ts);
-         printk("create debug_ts file error\n");
-         return -1;
-     }	  
-#endif
-     ret = sysfs_create_file(kobject_ts, &firmware_tptype_attr.attr);
-     if (ret) {
-         kobject_put(kobject_ts);
-         printk("create tptype file error\n");
-         return -1;
-     }
      return 0;   
  }
-
-void poweron_touchscreen(void){
-    struct t1320  * ts ;
-    ts = (struct t1320 *)g_client->dev.platform_data; 
-    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
-       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
-    if(i2c_smbus_read_byte_data(g_client,0x00) < 0){
-        printk("touchscreen has poweroff and wil poweron for do some operation\n");
-        msm_gpiomux_get(GPIO_CTP_POWER);
-        msm_gpiomux_get(GPIO_CTP_INT);   
-        msm_gpiomux_get(GPIO_CTP_RESET);  
-        ts->chip_poweron_reset() ; 
-    }
-    /*for update_firmware ,it should delay 500ms for touchscreen poweron reset complete*/
-    if(1 == is_upgrade_firmware){
-		msleep(500) ;
-    }
-}
-	
-#ifdef CONFIG_DEBUG_T1320_FIRMWARE
- static ssize_t ts_debug_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
- {
-	memcpy(time_ta+RFLAG_LAYER_PHASE_START,&time_tp,LAYER_PHASE_DATA_NUM);
-	memcpy(time_ta+RFLAG_REPORT_NUM,&sensor_report_num,sizeof(unsigned short));	
-	memcpy(buf,time_ta,MAX_DATA_NUM); 
-	return MAX_DATA_NUM ;
- }
  
- static ssize_t ts_debug_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
- {
-     struct t1320  * ts ;
-     int ret = 0 ;
-     unsigned short bootloader_id;
-     ts = (struct t1320 *)g_client->dev.platform_data; 
  
-     if(buf[0] == FLAG_RR){
-             return i2c_smbus_read_byte_data(g_client,buf[1]);
-     }else if(buf[0] == FLAG_WR){
-	 if(i2c_smbus_write_byte_data(g_client, buf[1],buf[2]) < 0){
-                 return 0 ;
-        }
-	 else
-	 	return 1 ;
-     }else if(buf[0] == FLAG_RPX){
-		return ts_debug_X ;
-     }else if(buf[0] == FLAG_RPY){
-		return ts_debug_Y ;
-     }else if(buf[0] == FLAG_RNIT){
-		return ts->interrupts_pin_status() ;
-     }else if(buf[0] == FLAG_HRST){
-		return ts->chip_reset() ; ;
-     }else  if(buf[0] == FLAG_SRST){
-     		ret =  i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_cmd0);
-		ret |= 0x01  ;
-		 if(i2c_smbus_write_byte_data(g_client, update_firmware_addr.f01_t1320_tm1771_cmd0,ret) < 0){
-	                 return 0 ;
-	        }
-		 else
-		 	return 1 ;
-     }else if(buf[0] == FLAG_EINT){
-            /*if not interrupts modem ,return fail*/
-           if (0 == ts->use_irq)
-	        return 0 ;
-            /*register msm8660 interrupts*/
-	     ret = request_irq(g_client->irq, t1320_irq_handler,IRQF_TRIGGER_LOW,  g_client->name, ts);
-	     if(ret) {
-	         printk(KERN_ERR "Failed to request IRQ!ret = %d\n", ret); 
-		  return 0 ;
-	     }
-		 
-	    /*clear t1320 interrupt flag*/
-	    t1320_attn_clear(ts);
-	    /*t1320 leave sleep mode*/
-	    ret = i2c_smbus_read_byte_data(g_client,f01_rmi_ctrl0);
-	    ret &=  ~(0x03);
-	    i2c_smbus_write_byte_data(g_client,f01_rmi_ctrl0,ret);
-	    return 1 ;
-     }else if(buf[0] == FLAG_DINT){
-           /*if not interrupts modem ,return fail*/
-           if (0 == ts->use_irq )
-	        return 0 ;
-	     /*t1320 enter sleep mode*/
-	    ret = i2c_smbus_read_byte_data(g_client,f01_rmi_ctrl0);
-	    ret = (ret | 1) & (~(1 << 1)) ;
-	    i2c_smbus_write_byte_data(g_client,f01_rmi_ctrl0,ret);
-	    /*clear t1320 interrupt flag*/
-	    t1320_attn_clear(ts);
-	   /*disable msm8660 interrupts*/
-	    t1320_disable(ts);
-	   /*unregister msm8660 interrupts*/
-	    free_irq(g_client->irq, ts);
-	    return 1 ;
- }else if(buf[0] == FLAG_RTA){
-       if(buf[1] == WFLAG_ENABLE_TA){
-		flag_enable_ta = buf[2] ;
-		time_ta[RFLAG_ENABLE_TA] = flag_enable_ta ;
-		return 1 ;
-      	}else if(buf[1]== LAYER_PTHASE_DRIVER){
-		return 1 ;/*write of time_ta is at ts_debug_show(),so here return directly */
-      }else if((buf[1]>= LAYER_PTHASE_EVENTHUB) &&  (buf[1] <= MAX_LAYER_PTHASE)){
-   		memcpy(time_ta+RFLAG_LAYER_PHASE_START+buf[1]*LAYER_PHASE_DATA_NUM,buf+2,LAYER_PHASE_DATA_NUM);  
-		return 1 ;
-      } else
-	 	return 0 ;
-     }else  if(buf[0] == FLAG_PRST){
-        /*enable power reset after execute power up debug command*/
-        power_reset_enable = 1 ;
-        return ts->chip_poweron_reset() ; 
-    }else  if(buf[0] == FLAG_POFF){
-        /*disable power reset after execute power off debug command*/
-        power_reset_enable = 0 ;
-        return ts->chip_poweroff() ; 
-   }else  if(buf[0] == FLAG_EFW){
-		  if(t1320_tm1771_enable_program(g_client) != 0){
-		         printk("t1320_tm1771 page func check error\n");
-		         return 0;
-	       }
-		  bootloader_id = i2c_smbus_read_word_data(g_client,update_firmware_addr.f34_t1320_tm1771_query0);
-          i2c_smbus_write_word_data(g_client,update_firmware_addr.f34_t1320_tm1771_data2, bootloader_id );
-     		//issue erase commander
-     		if(i2c_smbus_write_byte_data(g_client, update_firmware_addr.f34_t1320_tm1771_data3, 0x03) < 0){
-	         	printk("t1320_tm1771_program_firmware error, erase firmware error \n");
-	         	return 0;
-	      }
-    		 t1320_tm1771_wait_attn(g_client,300);
-	     //check status
-	     if((ret = i2c_smbus_read_byte_data(g_client,update_firmware_addr.f34_t1320_tm1771_data3)) != 0x80){
-			 printk("check firmware status error!\n");
-	         return 0;
-     		}
-		 return 1 ;
-    }else if(buf[0] == FLAG_DBG){
-	       	 debug_level = buf[1] ;
-		return 1 ;
-   }else {
-		return 0;
-     }
-  }
- #endif
- 
-  static ssize_t firmware_version_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
- {
-       char  ret = -1;
-	   
-    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
-       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
-	poweron_touchscreen();
-       ret = i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_query0+3);
-	return sprintf(buf, "%03d", ret) ;
- }
- 
- static ssize_t firmware_version_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
- {
-	return 0;
- }
-
-  static ssize_t tp_control_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
-  {
-      return 0;
-  }
- 
-  static ssize_t tp_control_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
-  {
-      struct t1320  * ts ;
-      int on = -1;
-      ts = (struct t1320 *)g_client->dev.platform_data;     
-      on = simple_strtoul(buf, NULL, 0);
-      if (on == 0 && is_upgrade_firmware == 0) {
-      	power_reset_enable = 0;
-        ts->chip_poweroff() ;
-      	return  count;
-      } else if (on == 1) {      
-      	power_reset_enable = 1;
-      	ts->chip_poweron_reset(); 
-        return count;
-      } else {
-			printk(KERN_ERR "Invalid argument or firmware upgrading.");
-            return -1;
-      }
-  }
-  static ssize_t firmware_tptype_show(struct kobject *kobj, struct kobj_attribute *attr,char *buf)
- {
-	char tptype[F01_PRODUCTID_SIZE+1]={0};
-	unsigned char i=0;
-
-    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
-       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
-	poweron_touchscreen();
-	
-	for(i=0;i<F01_PRODUCTID_SIZE;i++)
-       	tptype[i] = i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_query0+F01_PRODUCTID_QUERY_OFFSET+i);
-
-	return sprintf(buf, "%s", tptype) ;
- }
- 
- static ssize_t firmware_tptype_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
- {
-	return 0;
- }
  /*
   * The "update_firmware" file where a static variable is read from and written to.
   */
@@ -937,11 +635,8 @@ void poweron_touchscreen(void){
  
  firmware_find_device:
         /*disable power reset when firmware upgrade*/
-        power_reset_enable = 0 ;
-        is_upgrade_firmware = 1 ;
     /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
        will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
-       poweron_touchscreen();
          disable_irq(g_client->irq);          
          ret = i2c_update_firmware(g_client, path_image);
          enable_irq(g_client->irq);
@@ -955,9 +650,7 @@ void poweron_touchscreen(void){
              ret = 1;
          }
      }
-        /*enable power reset after firmware upgrade*/
-        power_reset_enable = 1 ;
-        is_upgrade_firmware = 0 ;
+     
      return ret;
   }
  
@@ -1300,26 +993,6 @@ static void t1320_report_buttons(struct input_dev *dev,
 	for (b = 0; b < points_supported; ++b) {
 		int button = (data[b / 8] >> (b % 8)) & 1;
 		input_report_key(dev, base + b, button);
-	}
-}
-
-static void t1320_work_reset_func(struct work_struct *work)
-{
-	struct t1320  * ts ;
- 	ts = (struct t1320 *)g_client->dev.platform_data; 
-
-      /*if disable power reset,return directly*/
-	if(0 == power_reset_enable)
-		return ;
-	if(i2c_smbus_read_byte_data(g_client,0x00) < 0){
-		/*if i2c communication has problem, power up reset touchcreen chip */
-		if(power_reset_cnt < MAX_POWERRESET_NUM){
-			printk(KERN_ERR "%s:touchscreen i2c has problem and power up reset it\n", __func__);
-			ts->chip_poweron_reset() ; 
-			power_reset_cnt++;
-		}
-	}else{
-		power_reset_cnt = 0 ;
 	}
 }
 
@@ -1708,55 +1381,12 @@ static void t1320_work_func(struct work_struct *work)
 					ts->f30.points_supported, BTN_F30);
 		}
 		input_sync(ts->input_dev);
-#ifdef CONFIG_DEBUG_T1320_FIRMWARE
-		if ( 1 == flag_enable_ta){
-			if(true == flag_first_point){
-				getnstimeofday(&time_tp.time_first_end);
-				flag_first_point = false ;								
-			}
-
-			if(true == flag_last_point){
-				getnstimeofday(&time_tp.time_last_end);
-				flag_last_point = false ;	
-				flag_first_point = true ;  
-
-				time_tp.time_first_start.tv_nsec /=  NSEC_PER_USEC;
-				time_tp.time_first_end.tv_nsec /=  NSEC_PER_USEC;
-				time_tp.time_last_end.tv_nsec /=  NSEC_PER_USEC;	
-			}
-		}
-#endif	
-	}
-
-	/*if chip report exception detectde power up reset touchscreent*/
-	if( 0x03 ==  (i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_data0) & 0x07)){
-		if (i2c_smbus_read_byte_data(g_client,update_firmware_addr.f01_t1320_tm1771_data0+1) & 0x02){
-			printk(KERN_ERR "%s: t1320 chip detect exception and will power up reset it\n", __func__);
-			ts->chip_poweron_reset() ; 
-		}
 	}
 
 	if (ts->use_irq){
-		t1320_attn_clear(ts);
 		enable_irq(ts->client->irq);
-
-	}
-	/*disable power reset after process point report*/
-	power_reset_enable = 1 ;
-	if(debug_level >= 3)
-		printk("%s:exit t1320 work func\n",__func__);
-}
-
-static enum hrtimer_restart t1320_timer_reset_func(struct hrtimer *timer)
-{
-	struct t1320 *ts = container_of(timer, \
-					struct t1320, timer_reset);
-
-	queue_work(t1320_wq_reset, &ts->work_reset);
-
-	hrtimer_start(&ts->timer_reset, ktime_set(2, 0), HRTIMER_MODE_REL);
-
-	return HRTIMER_NORESTART;
+		t1320_attn_clear(ts);
+    }
 }
 
 static enum hrtimer_restart t1320_timer_func(struct hrtimer *timer)
@@ -1774,20 +1404,10 @@ static enum hrtimer_restart t1320_timer_func(struct hrtimer *timer)
 irqreturn_t t1320_irq_handler(int irq, void *dev_id)
 {
 	struct t1320 *ts = dev_id;
-	int ret ;
-#ifdef CONFIG_DEBUG_T1320_FIRMWARE
-	if (1 == flag_enable_ta){
-		sensor_report_num ++ ;
-		if(true == flag_first_point){
-			sensor_report_num = 1 ;
-			getnstimeofday(&time_tp.time_first_start);
-		}
-	}
-#endif
+
 	disable_irq_nosync(ts->client->irq);
-	ret = queue_work(t1320_wq, &ts->work);
-     if(debug_level >= 3)
-		printk("%s:irq handler ret=%d\n",__func__,ret);
+	queue_work(t1320_wq, &ts->work);
+
 	return IRQ_HANDLED;
 }
 
@@ -1900,7 +1520,6 @@ static int t1320_probe(struct i2c_client *client,
 
 	ts = (struct t1320 *)client->dev.platform_data; 
 	INIT_WORK(&ts->work, t1320_work_func);
-	INIT_WORK(&ts->work_reset, t1320_work_reset_func);
 	ts->client = client;
 	ts->client ->adapter->retries = 3 ;
 	i2c_set_clientdata(client, ts);
@@ -2021,10 +1640,7 @@ static int t1320_probe(struct i2c_client *client,
 		ts->timer.function = t1320_timer_func;
 		hrtimer_start(&ts->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
 	}
-	hrtimer_init(&ts->timer_reset, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	ts->timer_reset.function = t1320_timer_reset_func;
-	/*set 2s time out */
-	hrtimer_start(&ts->timer_reset, ktime_set(2, 0), HRTIMER_MODE_REL);
+
 	/*
 	 * Device will be /dev/input/event#
 	 * For named device files, use udev
@@ -2075,13 +1691,6 @@ static int t1320_probe(struct i2c_client *client,
          ts_firmware_file();
 	 t1320_tm1771_read_PDT(g_client);
 #endif
-#ifdef CONFIG_DEBUG_T1320_FIRMWARE
-	flag_first_point = true ;
-	flag_last_point = false ;
-	flag_enable_ta = 0 ;
-#endif
-	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 2, 0x3);
-	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 3, 0x3);
 	return 0;
 
 err_input_register_device_failed:
@@ -2127,25 +1736,13 @@ static int t1320_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	struct t1320 *ts = i2c_get_clientdata(client);
     int ret=0;
-	
-	hrtimer_cancel(&ts->timer_reset);
-	 /*disable power reset when system suspend */
-	power_reset_enable = 0 ;
-
+    
     /*Enter sleep mode*/
     ret = i2c_smbus_read_byte_data(client,f01_rmi_ctrl0);
     ret = (ret | 1) & (~(1 << 1)) ;
     i2c_smbus_write_byte_data(client,f01_rmi_ctrl0,ret);
-    t1320_attn_clear(ts);
-    t1320_disable(ts);
-    if (ts->use_irq)
-        free_irq(client->irq, ts);
-        if(0 == is_upgrade_firmware){
-          ts->chip_poweroff() ; 
-	   msm_gpiomux_put(GPIO_CTP_POWER);
-          msm_gpiomux_put(GPIO_CTP_INT);   
-	   msm_gpiomux_put(GPIO_CTP_RESET);  
-       }
+	t1320_disable(ts);
+    
 	return 0;
 }
 
@@ -2154,44 +1751,15 @@ static int t1320_resume(struct i2c_client *client)
 	struct t1320 *ts = i2c_get_clientdata(client);
     /* begin: add by liyaobing l00169718 20110210 for t1320 sleep mode */
     int ret=0;
-    /* end: add by liyaobing l00169718 20110210 for t1320 sleep mode */
-	 if(0 == is_upgrade_firmware){
-    /*since  will poweroff touchscreen  when system enter suspned,it is possible poweroff touchscreen here that
-       will cause update firmware fail. so reading register of touchscreen ,if fail poweron touchscreen again */
-	    if(i2c_smbus_read_byte_data(g_client,0x00) < 0){
-	        msm_gpiomux_get(GPIO_CTP_POWER);
-	        msm_gpiomux_get(GPIO_CTP_INT);   
-	        msm_gpiomux_get(GPIO_CTP_RESET);  
-	        ts->chip_poweron() ; 
-    	    }  
-	 }
-    if (client->irq) {
-		printk(KERN_INFO "Requesting IRQ...\n");
-		ret = request_irq(client->irq, t1320_irq_handler,
-				IRQF_TRIGGER_LOW,  client->name, ts);
-
-		if(ret) {
-			printk(KERN_ERR "Failed to request IRQ!ret = %d\n", ret);          		
-		}else {
-			printk(KERN_INFO "Set IRQ Success!\n");
-            		ts->use_irq = 1;
-		}
-
-	}
-    t1320_attn_clear(ts);
+    
+	t1320_enable(ts);
 
     /*begin: add by liyaobing l00169718 20110210 for t1320 sleep mode */
     /*Enter normal mode*/
     ret = i2c_smbus_read_byte_data(client,f01_rmi_ctrl0);
     ret &=  ~(0x03);
     i2c_smbus_write_byte_data(client,f01_rmi_ctrl0,ret);
-	/*end: add by liyaobing l00169718 20110210 for t1320 sleep mode */
-
-	 /*enable power reset when system resume */
-	power_reset_enable = 1 ;
-	hrtimer_start(&ts->timer_reset, ktime_set(2, 0), HRTIMER_MODE_REL);
-	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 2, 0x3);
-	i2c_smbus_write_byte_data(client, f11_rmi_ctrl0 + 3, 0x3);
+    
 	return 0;
 }
 

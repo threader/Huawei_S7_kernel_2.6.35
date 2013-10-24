@@ -1702,66 +1702,6 @@ static struct msm_gpio ctp_cfg[] = {
 	{ GPIO_CFG(GPIO_CTP_POWER, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), "ctp_power" },
 };
 
-static int ctp_gpio_setup(int enable)
-{
-	int status = 0;
-    
-	if (enable) {
- 		status = gpio_request(GPIO_CTP_POWER, "ctp_power");
-		if (status) {
-			pr_err("%s:Failed to request GPIO %d\n",
-						__func__, GPIO_CTP_POWER);
-			return status;
-		}
-        
-		status = gpio_direction_output(GPIO_CTP_POWER, 1);
-		if (status) {
-			pr_err("%s:Failed to configure GPIO %d\n",
-					__func__, GPIO_CTP_POWER);
-			goto gpio_free_3v3_en;
-		}
-        
-		status = gpio_request(GPIO_CTP_INT, "ctp_irq");
-		if (status) {
-			pr_err("%s:Failed to request GPIO %d\n",
-						__func__, GPIO_CTP_INT);
-			return status;
-		}
-        
-		status = gpio_direction_input(GPIO_CTP_INT);
-		if (status) {
-			pr_err("%s:Failed to configure GPIO %d\n",
-					__func__, GPIO_CTP_INT);
-			goto gpio_free_int;
-		}
-        
-		status = gpio_request(GPIO_CTP_RESET, "ctp_reset");
-		if (status) {
-			pr_err("%s:Failed to request GPIO %d\n",
-						__func__, GPIO_CTP_RESET);
-			goto gpio_free_int;
-		}
-
-		status = gpio_direction_output(GPIO_CTP_RESET, 1);
-		if (status) {
-			pr_err("%s:Failed to configure GPIO %d\n",
-					__func__, GPIO_CTP_RESET);
-			goto gpio_free_rst;
-		}
-
-		pr_debug("\nISP GPIO configuration done\n");
-		return status;
-	}
-
-gpio_free_3v3_en:
-	gpio_free(GPIO_CTP_POWER);
-gpio_free_rst:
-	gpio_free(GPIO_CTP_INT);
-gpio_free_int:
-	gpio_free(GPIO_CTP_RESET);
-	return status;
-}
-
 static int ctp_vbus_ctrl(int on)
 {
 	struct vreg *vreg_gp5;
@@ -1801,16 +1741,6 @@ static int ctp_vbus_ctrl(int on)
 	}        
 	return 0;
 }
-static int ctp_chip_reset(void)
-{
-	gpio_set_value(GPIO_CTP_POWER, 1);
-	mdelay(5);
-	gpio_set_value(GPIO_CTP_RESET, 0);
-	mdelay(5);
-	gpio_set_value(GPIO_CTP_RESET, 1);
-	mdelay(50);
-	return 1 ;
-}
 
 static void ctp_exit_platform_hw(void)
 {
@@ -1820,74 +1750,22 @@ static void ctp_exit_platform_hw(void)
 
 static int ctp_init_platform_hw(void)
 {
+	int rc = -ENODEV;
 
-	int ret = 0;
-    
-    ret = ctp_gpio_setup(1);
-    if (ret < 0) 
-        return ret ;            
-    ret = ctp_vbus_ctrl(1);
-    if (ret < 0) {
-        return ret;
-    }
-    
-	ctp_chip_reset();
-	return ret;
-	ret = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
-	if (ret < 0) {
-		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, ret);
+	rc = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
+	if (rc < 0) {
+		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, rc);
 	}  
-
-	ctp_chip_reset();
-	return ret;
-/*
+	
+	ctp_vbus_ctrl(1);
 	gpio_set_value(GPIO_CTP_POWER, 1);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 0);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 1);
-	mdelay(50);*/
-
+	mdelay(50);
+	return rc;
 }
-static int get_interrupts_status(void)
-{
-	return gpio_get_value(GPIO_CTP_INT);
-}
-static int ctp_power_off(void)
-{
-    gpio_set_value(GPIO_CTP_POWER, 0);
-    	ctp_vbus_ctrl(0);
-	return 1 ;
-}
-static int ctp_power_on(void)
-{
-
-      // config_boost_5v_gpio(1);
-        gpio_set_value(GPIO_CTP_POWER, 1);
-        ctp_vbus_ctrl(1);
-
-        gpio_set_value(GPIO_CTP_RESET, 1);
-        msleep(5);
-        gpio_set_value(GPIO_CTP_RESET, 0);
-        msleep(5);
-        gpio_set_value(GPIO_CTP_RESET, 1);
-
-        msleep(50);
-        return 1 ;
-}
-static int ctp_poweron_reset(void)
-{
-    gpio_set_value(GPIO_CTP_POWER, 0);
-    ctp_vbus_ctrl(0);
-    msleep(100);
-
-    gpio_set_value(GPIO_CTP_POWER, 1);
-    ctp_vbus_ctrl(1);
-     ctp_chip_reset();
-	
-    return 1 ;
-}
-
 #endif
 #if defined(CONFIG_TOUCHSCREEN_T1320) || defined(CONFIG_TOUCHSCREEN_T1320_MODULE)
 static struct t1320 t1320_pdata = {
@@ -1916,22 +1794,13 @@ static struct t1320 t1320_pdata = {
 	.hasF30 = false,
 	.enable = 0,
 	.init_platform_hw = ctp_init_platform_hw,
-	.exit_platform_hw = ctp_exit_platform_hw,
-	.interrupts_pin_status = get_interrupts_status,
-	.chip_reset = ctp_chip_reset,
-	.chip_poweron_reset = ctp_poweron_reset,
-	.chip_poweron = ctp_power_on,
-	.chip_poweroff = ctp_power_off,	
+	.exit_platform_hw = ctp_exit_platform_hw,	
 };
 #endif
 #if defined(CONFIG_TOUCHSCREEN_MXT224) || defined(CONFIG_TOUCHSCREEN_MXT224_MODULE)
 static struct mxt224_platform_data mxt224_pdata = {
 	.init_platform_hw = ctp_init_platform_hw,
 	.exit_platform_hw = ctp_exit_platform_hw,
-	.interrupts_pin_status = get_interrupts_status,
-	.chip_reset = ctp_chip_reset,
-	.chip_poweron_reset = ctp_poweron_reset,
-	.chip_poweroff = ctp_power_off,
 };
 #endif
 

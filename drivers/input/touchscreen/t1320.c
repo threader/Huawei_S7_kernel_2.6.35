@@ -1607,18 +1607,6 @@ static void t1320_work_func(struct work_struct *work)
 						wy = finger_reg[3] / 0x10;
 						z = finger_reg[4];
 
-				add_sample(finger, finger_status, x, y, z, wx, wy);
-				if (finger->dirty)
-					dirty = 1;
-			}
-
-			if (dirty) {
-				for (f = 0; f < ts->f11.points_supported; ++f) {
-					struct f11_finger_data *finger = &ts->f11_fingers[f];
-					report_finger(ts, finger);
-				}
-			}
-
 		                if (KEYPAD_AREA(x, y, HOME)) {
                           	/* bengin: modify by liyaobing 20110107 for eliminating the jitter of keys */
                           	if(!(touch_state & TOUCH_HOME)){
@@ -1639,15 +1627,20 @@ static void t1320_work_func(struct work_struct *work)
 	                        ts_update_pen_state(ts, x, y, z, wx, wy);
 							touch_state |= TOUCH_PEN;
 
-#ifdef CONFIG_SYNA_MULTIFINGER
-							/* Report multiple fingers for software prior to 2.6.31 - not standard - uses special input.h */
-							input_report_abs(ts->input_dev, ABS_X_FINGER(f), x);
-							input_report_abs(ts->input_dev, ABS_Y_FINGER(f), y);
-							input_report_abs(ts->input_dev, ABS_Z_FINGER(f), z);
-#endif
-
 							ts->f11_fingers[f].status = finger_status;
 						}
+				add_sample(finger, finger_status, x, y, z, wx, wy);
+				if (finger->dirty)
+					dirty = 1;
+			}
+
+			if (dirty) {
+				for (f = 0; f < ts->f11.points_supported; ++f) {
+					struct f11_finger_data *finger = &ts->f11_fingers[f];
+					report_finger(ts, finger);
+				}
+			}
+
 
 			/* f == ts->f11.points_supported */
 			/* set f to offset after all absolute data */

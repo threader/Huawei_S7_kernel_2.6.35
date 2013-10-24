@@ -1696,6 +1696,12 @@ static struct compass_platform_data compass_pdata = {
 #define GPIO_CTP_POWER   		(105)
 #define GPIO_CTP_RESET       	(158)
 
+static struct msm_gpio ctp_cfg[] = {
+	{ GPIO_CFG(GPIO_CTP_INT, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),"ctp_irq" },
+	{ GPIO_CFG(GPIO_CTP_RESET, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),"ctp_reset" },
+	{ GPIO_CFG(GPIO_CTP_POWER, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), "ctp_power" },
+};
+
 static int ctp_gpio_setup(int enable)
 {
 	int status = 0;
@@ -1756,13 +1762,7 @@ gpio_free_int:
 	return status;
 }
 
-static struct msm_gpio ctp_cfg[] = {
-	{ GPIO_CFG(GPIO_CTP_INT, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),"ctp_irq" },
-	{ GPIO_CFG(GPIO_CTP_RESET, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),"ctp_reset" },
-	{ GPIO_CFG(GPIO_CTP_POWER, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), "ctp_power" },
-};
-
-static int ctp_vbus_ctrl(int vreg_on)
+static int ctp_vbus_ctrl(int on)
 {
 	struct vreg *vreg_gp5;
 	int rc=0;
@@ -1781,7 +1781,7 @@ static int ctp_vbus_ctrl(int vreg_on)
 		return -EIO;
 	}
 	
-   if (vreg_on)
+	if(on)
 	{
 		rc = vreg_enable(vreg_gp5);
 		if (rc)
@@ -1803,50 +1803,51 @@ static int ctp_vbus_ctrl(int vreg_on)
 }
 static int ctp_chip_reset(void)
 {
-     	gpio_set_value(GPIO_CTP_RESET, 1);
-    	msleep(5);
-    	gpio_set_value(GPIO_CTP_RESET, 0);
-    	msleep(5);
-    	gpio_set_value(GPIO_CTP_RESET, 1);
-    	msleep(100);
+	gpio_set_value(GPIO_CTP_POWER, 1);
+	mdelay(5);
+	gpio_set_value(GPIO_CTP_RESET, 0);
+	mdelay(5);
+	gpio_set_value(GPIO_CTP_RESET, 1);
+	mdelay(50);
 	return 1 ;
 }
 
 static void ctp_exit_platform_hw(void)
 {
-	ctp_gpio_setup(0);
+	ctp_vbus_ctrl(0);
 	msm_gpios_disable_free(ctp_cfg, ARRAY_SIZE(ctp_cfg));
 }
 
 static int ctp_init_platform_hw(void)
 {
-	int rc = 0;
 
-    rc = ctp_gpio_setup(1);
-    if (rc < 0) 
-        return rc ;        
-	/*rc = ctp_vbus_setup(1);
-    if (rc < 0) 
-        return rc ; */   
-
-	rc = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
-	if (rc < 0) {
-		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, rc);
+	int ret = 0;
+    
+    ret = ctp_gpio_setup(1);
+    if (ret < 0) 
+        return ret ;            
+    ret = ctp_vbus_ctrl(1);
+    if (ret < 0) {
+        return ret;
+    }
+    
+	ctp_chip_reset();
+	return ret;
+	ret = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
+	if (ret < 0) {
+		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, ret);
 	}  
 
-	gpio_set_value(GPIO_CTP_POWER, 1);
-	ctp_vbus_ctrl(1);
-
-
 	ctp_chip_reset();
+	return ret;
 /*
-	gpio_set_value(GPIO_CTP_RESET, 1);
+	gpio_set_value(GPIO_CTP_POWER, 1);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 0);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 1);
 	mdelay(50);*/
-	return rc;
+
 }
 static int get_interrupts_status(void)
 {
@@ -1856,7 +1857,6 @@ static int ctp_power_off(void)
 {
     gpio_set_value(GPIO_CTP_POWER, 0);
     	ctp_vbus_ctrl(0);
-	//config_boost_5v_gpio(0);
 	return 1 ;
 }
 static int ctp_power_on(void)
@@ -1881,7 +1881,6 @@ static int ctp_poweron_reset(void)
     ctp_vbus_ctrl(0);
     msleep(100);
 
-    //config_boost_5v_gpio(1);
     gpio_set_value(GPIO_CTP_POWER, 1);
     ctp_vbus_ctrl(1);
      ctp_chip_reset();

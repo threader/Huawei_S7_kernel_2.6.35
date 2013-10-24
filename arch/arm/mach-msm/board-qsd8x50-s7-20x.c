@@ -1922,19 +1922,19 @@ static struct t1320 t1320_pdata = {
 	.exit_platform_hw = ctp_exit_platform_hw,
 	.interrupts_pin_status = get_interrupts_status,
 	.chip_reset = ctp_chip_reset,
-	.chip_poweron_reset =ctp_poweron_reset,
-	.chip_poweron =ctp_power_on,
-	.chip_poweroff =ctp_power_off,	
+	.chip_poweron_reset = ctp_poweron_reset,
+	.chip_poweron = ctp_power_on,
+	.chip_poweroff = ctp_power_off,	
 };
 #endif
 #if defined(CONFIG_TOUCHSCREEN_MXT224) || defined(CONFIG_TOUCHSCREEN_MXT224_MODULE)
 static struct mxt224_platform_data mxt224_pdata = {
 	.init_platform_hw = ctp_init_platform_hw,
 	.exit_platform_hw = ctp_exit_platform_hw,
-	/*.chip_reset = ctp_chip_reset,
-	.chip_poweron_reset =ctp_poweron_reset,
-	.chip_poweron =ctp_power_on,
-	.chip_poweroff =ctp_power_off,*/
+	.interrupts_pin_status = get_interrupts_status,
+	.chip_reset = ctp_chip_reset,
+	.chip_poweron_reset = ctp_poweron_reset,
+	.chip_poweroff = ctp_power_off,
 };
 #endif
 

@@ -1149,7 +1149,10 @@ void qt_Gpio_Pwm_Init(void)
     gpiopwm_config.duty[1] = 0;
     gpiopwm_config.duty[2] = 0;
     gpiopwm_config.duty[3] = 0;
-
+    gpiopwm_config.trigger[0] = 0;
+    gpiopwm_config.trigger[1] = 0;
+    gpiopwm_config.trigger[2] = 0;
+    gpiopwm_config.trigger[3] = 0;
     if (write_gpio_config(0, gpiopwm_config) != CFG_WRITE_OK) 
         QT_printf("GPIO PWM configuration failed");
 }

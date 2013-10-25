@@ -117,7 +117,6 @@ struct t1320 {
 
 	unsigned int x_max;
 	unsigned int y_max;
-	struct timer_list timerlist;
     struct timer_list timerlistkey;    
     int	(*init_platform_hw)(void);
 	void (*exit_platform_hw)(void);

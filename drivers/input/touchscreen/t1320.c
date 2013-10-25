@@ -1688,8 +1688,8 @@ static int t1320_probe(struct i2c_client *client,
 			goto err_input_register_device_failed;
 
 #ifdef CONFIG_UPDATE_T1320_FIRMWARE  
+         g_client = client;  
          ts_firmware_file();
-	 t1320_tm1771_read_PDT(g_client);
 #endif
 	return 0;
 

@@ -322,22 +322,26 @@ gpio_i2c_adpt_probe(struct platform_device *pdev)
 	pdata = pdev->dev.platform_data;
 	if(!pdata)
 	{
+		dev_err(&pdev->dev, "[%s,%d]: platform data not initialized\n",__FUNCTION__,__LINE__);
 		return -ENOSYS;
 	}
 	if(!pdata->gpio_i2c_adpt_config_gpio)
 	{
+		dev_err(&pdev->dev, "[%s,%d]: config_gpio function not initialized\n",__FUNCTION__,__LINE__);
 		return -ENOSYS;
 	}
 
 	/* We support frequencies from 10KHz upto 400KHz */
 	if(pdata->dely_usec <1 || pdata->dely_usec >50) 
 	{
+		dev_err(&pdev->dev, "[%s,%d]: clock frequency not supported\n",__FUNCTION__,__LINE__);
 		return  -EIO;
 	}
 	
 	dev = kzalloc(sizeof(struct gpio_i2c_s7_dev),GFP_KERNEL);
 	if (!dev) 
 	{
+		dev_err(&pdev->dev, "[%s,%d]: not enough memory\n",__FUNCTION__,__LINE__);
 		return -ENOMEM;
 	}
 

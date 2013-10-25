@@ -63,14 +63,13 @@
 #include "msm-keypad-devices.h"
 #include "pm.h"
 #include "proc_comm.h"
+#include "smd_private.h"
 #include <linux/msm_kgsl.h>
 #ifdef CONFIG_USB_ANDROID
 #include <linux/usb/android_composite.h>
 //#include <linux/usb/android.h>
 #endif
 
-#define TOUCHPAD_SUSPEND 	34
-#define TOUCHPAD_IRQ 		38
 #include "board-qsd8x50-s7-extra.h" /* TRY TO KEEP IT CLEAN IN HERE! */
 
 
@@ -382,12 +381,18 @@ static struct usb_composition usb_func_composition[] = {
 		.product_id         = 0xF009,
 		.functions	    = 0x20, /* 100000 */
 	},
-
+#if !HUAWEI_HWID(S70)
 	{
 		.product_id         = 0x9018,
 		.functions	    = 0x1F, /* 011111 */
 	},
+#else
+	{
+		.product_id         = USBPID_HUAWEI_S7,
+		.functions	    = 0x1F, /* 011111 */
+	},
 
+#endif
 	{
 		.product_id         = 0x901A,
 		.functions	    = 0x0F, /* 01111 */
@@ -1684,7 +1689,7 @@ static struct cypress120_ts_i2c_platform_data cypress120_ts_platform_data = {
 #endif
 
 #if defined(CONFIG_SENSORS_AKM8973) || defined(CONFIG_SENSORS_AKM8973_MODULE)
-static struct compass_platform_data compass_pdata = {
+static struct akm8973_platform_data compass_pdata = {
   .irq = MSM_GPIO_TO_INT(GPIO_COMPASS_IRQ),
   .reset = GPIO_COMPASS_RESET,
 };
@@ -1752,14 +1757,17 @@ static int ctp_init_platform_hw(void)
 {
 	int rc = -ENODEV;
 
+	ctp_vbus_ctrl(1);
+	gpio_set_value(GPIO_CTP_POWER, 1);
+	mdelay(5);
+
 	rc = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
 	if (rc < 0) {
 		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, rc);
 	}  
-	
-	ctp_vbus_ctrl(1);
-	gpio_set_value(GPIO_CTP_POWER, 1);
-	mdelay(5);
+
+    gpio_set_value(GPIO_CTP_RESET, 1);
+    mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 0);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 1);
@@ -3319,7 +3327,7 @@ static void __init msm_device_i2c_init(void)
 		pr_err("failed to request gpio i2c_sec_dat\n");
 #endif
 
-	msm_i2c_pdata.rmutex = 1;
+	msm_i2c_pdata.rmutex = (uint32_t)smem_alloc(SMEM_I2C_MUTEX, 8);
 	msm_i2c_pdata.pm_lat =
 		msm_pm_data[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN]
 		.latency;
@@ -3579,7 +3587,8 @@ static void __init qsd8x50_init(void)
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 	msm_fb_add_devices();
 #ifdef CONFIG_MSM_CAMERA
-	config_camera_off_gpios(); /* might not be necessary */
+       /*lijuan rm*/
+	/*config_camera_off_gpios();*/ /* might not be necessary */
 #endif
 	qsd8x50_init_usb();
 	qsd8x50_init_mmc();

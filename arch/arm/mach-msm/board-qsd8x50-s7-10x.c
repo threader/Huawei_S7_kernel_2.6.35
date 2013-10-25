@@ -1868,7 +1868,7 @@ static struct cypress120_ts_i2c_platform_data cypress120_ts_platform_data = {
 #endif
 
 #if defined(CONFIG_SENSORS_AKM8973) || defined(CONFIG_SENSORS_AKM8973_MODULE)
-static struct compass_platform_data compass_pdata = {
+static struct akm8973_platform_data compass_pdata = {
   .irq = MSM_GPIO_TO_INT(GPIO_COMPASS_IRQ),
   .reset = GPIO_COMPASS_RESET,
 };
@@ -2658,6 +2658,7 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 };
 
 #if defined(CONFIG_HUAWEI_INCIDENT_LED)
+#include "msm_incident_led.h"
 static struct platform_device incident_led_device = {
 	.name		= "time_incident_led",
 	.id		= -1,
@@ -3631,7 +3632,8 @@ static void __init qsd8x50_init(void)
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 	msm_fb_add_devices();
 #ifdef CONFIG_MSM_CAMERA
-	config_camera_off_gpios(); /* might not be necessary */
+       /*lijuan rm*/
+	/*config_camera_off_gpios();*/ /* might not be necessary */
 #endif
 	qsd8x50_init_usb();
 	qsd8x50_init_mmc();
@@ -3658,6 +3660,7 @@ static void __init qsd8x50_init(void)
 	spi_register_board_info(msm_spi_board_info,
 				ARRAY_SIZE(msm_spi_board_info));
 	msm_pm_set_platform_data(msm_pm_data, ARRAY_SIZE(msm_pm_data));
+
 #ifdef CONFIG_SURF_FFA_GPIO_KEYPAD
 	if (machine_is_qsd8x50_ffa() || machine_is_qsd8x50a_ffa())
 		platform_device_register(&keypad_device_8k_ffa);
@@ -3689,7 +3692,7 @@ static void __init qsd8x50_init(void)
 #endif
 
 #if defined(CONFIG_HUAWEI_INCIDENT_LED)
-	init_incident_led_device();
+	//init_incident_led_device();
 #endif
 
 #ifdef CONFIG_HUAWEI_MSM_VIBRATOR

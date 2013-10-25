@@ -3,7 +3,8 @@
 #endif
 
 #if defined(CONFIG_SENSORS_AKM8973) || defined(CONFIG_SENSORS_AKM8973_MODULE)
-#include <mach/akm8972_board.h>
+//#include <mach/akm8972_board.h>
+#include <linux/akm8973.h>
 #endif
 
 #if HUAWEI_HWID_L2(S7, S7201)

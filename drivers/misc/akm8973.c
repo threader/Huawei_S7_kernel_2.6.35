@@ -31,7 +31,6 @@
 #include <linux/freezer.h>
 #include <linux/akm8973.h>
 #include <linux/earlysuspend.h>
-
 #ifdef CONFIG_ANDROID_POWER
 #include <linux/android_power.h>
 #endif
@@ -40,7 +39,7 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 
-#include "linux/hardware_self_adapt.h"
+#include <linux/hardware_self_adapt.h>
 #include <mach/msm_rpcrouter.h>
 
 //NOTICE: debug message open/off switch
@@ -678,6 +677,7 @@ error_irq_gpio:
     
     return -1;
 }
+
 
 static void akm8973_gpio_release(struct i2c_client *client)
 {

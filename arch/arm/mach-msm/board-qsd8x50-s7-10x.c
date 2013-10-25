@@ -65,6 +65,7 @@
 #include "proc_comm.h"
 #include <linux/msm_kgsl.h>
 #include "smd_private.h"
+#include <linux/msm_kgsl.h>
 #ifdef CONFIG_USB_ANDROID
 #include <linux/usb/android_composite.h>
 //#include <linux/usb/android.h>
@@ -81,8 +82,6 @@
 #define TCSR_SPARE2_ADDR	(ct_csr_base + 0x60)
 #endif 
 
-#define TOUCHPAD_SUSPEND 	34
-#define TOUCHPAD_IRQ 		38
 #include "board-qsd8x50-s7-extra.h" /* TRY TO KEEP IT CLEAN IN HERE! */
 
 
@@ -1937,14 +1936,19 @@ static int ctp_init_platform_hw(void)
 {
 	int rc = -ENODEV;
 
-	rc = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
-	if (rc < 0) {
-		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, rc);
-	}  
+ 
 	
 	ctp_vbus_ctrl(1);
 	gpio_set_value(GPIO_CTP_POWER, 1);
 	mdelay(5);
+
+	rc = msm_gpios_request_enable(ctp_cfg, ARRAY_SIZE(ctp_cfg));
+	if (rc < 0) {
+		printk(KERN_ERR "[%s,%d]: setup gpio failed. error code %d\n", __func__, __LINE__, rc);
+	} 
+
+    gpio_set_value(GPIO_CTP_RESET, 1);
+    mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 0);
 	mdelay(5);
 	gpio_set_value(GPIO_CTP_RESET, 1);
@@ -3462,7 +3466,7 @@ static void __init msm_device_i2c_init(void)
 		pr_err("failed to request gpio i2c_sec_dat\n");
 #endif
 
-	msm_i2c_pdata.rmutex = 1;
+	msm_i2c_pdata.rmutex = (uint32_t)smem_alloc(SMEM_I2C_MUTEX, 8);
 	msm_i2c_pdata.pm_lat =
 		msm_pm_data[MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN]
 		.latency;

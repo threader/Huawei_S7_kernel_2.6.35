@@ -51,14 +51,9 @@ static int power_reset_enable = 1 ;
 /*current power up reset times*/
 static int power_reset_cnt = 0 ;
 static struct workqueue_struct *t1320_wq_reset;
-//#define GPIO_3V3_EN (105)  
-#define GPIO_CTP_POWER             (105)  
-#define GPIO_CTP_INT   			(28)
-#define GPIO_CTP_RESET       	(158)
 extern int msm_gpiomux_put(unsigned gpio);
 extern int msm_gpiomux_get(unsigned gpio);
 static int is_upgrade_firmware = 0 ;
-void poweron_touchscreen(void);
 static struct workqueue_struct *t1320_wq;
 
 /* Register: EGR_0 */

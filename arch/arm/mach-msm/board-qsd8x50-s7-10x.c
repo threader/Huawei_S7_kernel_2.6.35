@@ -262,7 +262,7 @@ static struct android_usb_product usb_products[] = {
 };
 
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
-	.nluns		= 1,
+	.nluns		= 2,
 	.vendor		= "Qualcomm Incorporated",
 	.product        = "Mass storage",
 	.release	= 0x0100,

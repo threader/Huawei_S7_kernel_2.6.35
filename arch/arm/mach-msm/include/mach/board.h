@@ -26,6 +26,7 @@
 #ifdef CONFIG_MSM_BUS_SCALING
 #include <mach/msm_bus.h>
 #endif
+
 #define USBVID_HUAWEI								0x12d1
 
 #include <asm/clkdev.h>

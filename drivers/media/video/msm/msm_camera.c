@@ -3997,6 +3997,19 @@ int msm_camera_drv_start(struct platform_device *dev,
 	struct msm_cam_device *pmsm = NULL;
 	struct msm_sync *sync;
 	int rc = -ENODEV;
+	static int camera_node;
+	#ifdef CONFIG_HUAWEI_CAMERA
+       printk(KERN_ERR "msm_camera_drv_start------CONFIG_HUAWEI_CAMERA--defined\n");
+	struct msm_camera_sensor_info *sinfo;
+	static int camera_node_succee[MSM_MAX_CAMERA_SENSORS] = 
+	{0,0,0,0,0};
+
+	sinfo = dev->dev.platform_data;
+	camera_node = sinfo->slave_sensor;
+	if (camera_node_succee[camera_node]) {
+		return rc;
+	}
+	#endif	
 
 	if (camera_node >= MSM_MAX_CAMERA_SENSORS) {
 		pr_err("%s: too many camera sensors\n", __func__);
@@ -4034,6 +4047,10 @@ int msm_camera_drv_start(struct platform_device *dev,
 		kfree(pmsm);
 		return rc;
 	}
+	#ifdef CONFIG_HUAWEI_CAMERA
+    	sinfo = dev->dev.platform_data;
+        camera_node = sinfo->slave_sensor;
+	#endif
 
 	CDBG("%s: setting camera node %d\n", __func__, camera_node);
 	rc = msm_device_init(pmsm, sync, camera_node);
@@ -4045,7 +4062,11 @@ int msm_camera_drv_start(struct platform_device *dev,
 
 	camera_type[camera_node] = sync->sctrl.s_camera_type;
 	sensor_mount_angle[camera_node] = sync->sctrl.s_mount_angle;
+	#ifndef CONFIG_HUAWEI_CAMERA
 	camera_node++;
+	#else
+	camera_node_succee[camera_node] = 1;
+	#endif
 
 	list_add(&sync->list, &msm_sensors);
 	return rc;

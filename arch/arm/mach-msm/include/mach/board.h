@@ -217,10 +217,12 @@ struct msm_camera_sensor_platform_info {
 
 struct msm_camera_sensor_info {
 	const char *sensor_name;
+	void (*vreg_enable_func) (int);
 	int sensor_reset;
 	int sensor_pwd;
 	int vcm_pwd;
 	int vcm_enable;
+	int slave_sensor;
 	int mclk;
 	int flash_type;
 	struct msm_camera_sensor_platform_info *sensor_platform_info;

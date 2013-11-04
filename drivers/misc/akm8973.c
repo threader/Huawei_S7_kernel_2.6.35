@@ -174,12 +174,13 @@ static int AKI2C_TxData(char *txData, int length)
 }
 
 static void AKECS_Reset(void)
-{ 
-    gpio_set_value_cansleep(pdata->reset, 1);
-    mdelay(10);
-	gpio_set_value_cansleep(pdata->reset, 0);
+{
+  gpio_set_value(COMPASS_RST, 1);
+  mdelay(10);
+	gpio_set_value(pdata->reset, 0);
 	udelay(120);
-	gpio_set_value_cansleep(pdata->reset, 1);
+	gpio_set_value(pdata->reset, 1);
+
 }
 
 static int AKECS_StartMeasure(void)
@@ -380,7 +381,7 @@ static int akm_aot_open(struct inode *inode, struct file *file)
 	if (atomic_cmpxchg(&open_count, 0, 1) == 0) {
 		if (atomic_cmpxchg(&open_flag, 0, 1) == 0) {
 			atomic_set(&reserve_open_flag, 1);
-			enable_irq(this_client->irq);
+			//enable_irq(this_client->irq); 
 			wake_up(&open_wq);
 			ret = 0;
 		}
@@ -394,7 +395,7 @@ static int akm_aot_release(struct inode *inode, struct file *file)
 	atomic_set(&open_flag, 0);
 	atomic_set(&open_count, 0);
 	wake_up(&open_wq);
-	disable_irq(this_client->irq);
+	//disable_irq(this_client->irq); 
 	return 0;
 }
 
@@ -640,19 +641,6 @@ static int akm8973_gpio_setup(struct i2c_client *client)
     struct akm8973_platform_data  *pd;
     pd = client->dev.platform_data;  
 
-	rc = gpio_request(pd->irq, "akm8973_irq_gpio");
-	if (rc) {
-		pr_err("%s: unable to request irq gpio %d\n",
-			__func__, pd->irq);
-		goto error_irq_gpio;
-	}
-
-	rc = gpio_direction_input(pd->irq);
-	if (rc) {
-		pr_err("%s: unable to set direction for irq gpio %d\n",
-			__func__, pd->irq);
-		goto error_irq_gpio;
-	}
 
 	rc = gpio_request(pd->reset, "akm8973_reset_gpio");
 	if (rc) {
@@ -661,12 +649,15 @@ static int akm8973_gpio_setup(struct i2c_client *client)
 		goto error_reset_gpio;
 	}
 
-	rc = gpio_direction_output(pd->reset,1);
-	if (rc) {
+	rc = gpio_tlmm_config(GPIO_CFG(pd->reset, 0, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_10MA), GPIO_CFG_ENABLE);
+	if (rc < 0) {
 		pr_err("%s: unable to set direction for reset gpio %d\n",
 			__func__, pd->reset);
 		goto error_reset_gpio;
-	}
+	} else {
+    // successful
+    COMPASS_RST = pd->reset;
+  }
 
 	return 0;
 
@@ -684,14 +675,14 @@ static void akm8973_gpio_release(struct i2c_client *client)
     struct akm8973_platform_data  *pd;
     pd = client->dev.platform_data;
 
-	gpio_free(pd->irq);
+	//gpio_free(pd->irq);
     gpio_free(pd->reset);
 }
 
 static irqreturn_t akm8973_interrupt(int irq, void *dev_id)
 {
 	struct akm8973_data *data = dev_id;
-	disable_irq_nosync(this_client->irq);
+	//disable_irq_nosync(this_client->irq); 
 	schedule_work(&data->work);
 	return IRQ_HANDLED;
 }
@@ -848,7 +839,7 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto exit_alloc_data_failed;
 	}
 
-	INIT_WORK(&akm->work, akm_work_func);
+	//INIT_WORK(&akm->work, akm_work_func); // [Sean@2011-3-7]: change to polling mode
 	i2c_set_clientdata(client, akm);
 
 	pdata = client->dev.platform_data;
@@ -883,6 +874,8 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto exit_set_mode_failed;
 	}
 
+	/*
+	// [Sean@2011-3-7]: change to polling mode
 	err = request_irq(client->irq, akm8973_interrupt, IRQF_TRIGGER_HIGH,
 			  "akm8973", akm);
 	disable_irq(this_client->irq);
@@ -891,7 +884,8 @@ int akm8973_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		printk(KERN_ERR"AKM8973 akm8973_probe: request irq failed\n");
 		goto exit_irq_request_failed;
 	}
-
+	*/
+	
 	set_bit(EV_ABS, akm->input_dev->evbit);
 	/* yaw */
 	input_set_abs_params(akm->input_dev, ABS_RX, 0, 23040, 0 ,0); //0, 360, 0, 0); //[Sean@2011-03-07] why ?
@@ -995,7 +989,7 @@ exit_check_functionality_failed:
 	return err;
 }
 
-static int akm8973_detect(struct i2c_client *client,
+static int akm8973_detect(struct i2c_client *client, int kind,
 			  struct i2c_board_info *info)
 {
 #if DEBUG
@@ -1021,7 +1015,7 @@ static int akm8973_suspend(struct i2c_client *client, pm_message_t mesg)
 #if DEBUG
 	printk(KERN_ERR "AK8973 compass driver: akm8973_suspend\n");
 #endif
-	disable_irq(client->irq);
+	//disable_irq(client->irq); // [Sean@2011-3-7]: change to polling mode
 	ret = AKECS_SetMode(AKECS_MODE_POWERDOWN);
 	if (ret < 0)
 			printk(KERN_ERR "akm8973_suspend power off failed\n");
@@ -1043,7 +1037,7 @@ static int akm8973_resume(struct i2c_client *client)
 	ret = AKECS_SetMode(AKECS_MODE_MEASURE);
 	if (ret < 0)
 			printk(KERN_ERR "akm8973_resume power measure failed\n");
-	enable_irq(client->irq);
+	//enable_irq(client->irq); // [Sean@2011-3-7]: Change to polling mode
 	atomic_set(&open_flag, atomic_read(&reserve_open_flag));
 	wake_up(&open_wq);
 

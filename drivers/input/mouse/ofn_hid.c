@@ -57,7 +57,7 @@
  *
  */
 /*
- *  FO1W-I2C Optical finger navigation driver.
+ * ATLab FO1W-I2C Optical finger navigation driver.
  *
  */
 
@@ -84,7 +84,7 @@
 
 #define DRIVER_NAME                    "ofn_hid"
 #define DEVICE_NAME                    "fo1w"
-#define OPTNAV_NAME                    "HID OFN"
+#define OPTNAV_NAME                    "Atlab OFN"
 #define OPTNAV_NAME_BUTTON_CENTER           "OFN button center"
 #define OPTNAV_DEVICE                  "/dev/ofn"
 #define OPTNAV_STEP				  0x02
@@ -110,6 +110,10 @@ static int optnav_i2c_write(struct i2c_client *client, u8 reg, u8 data)
 	ret = i2c_smbus_write_byte_data(client, reg, data);
   
 
+	/* Device NAK's writes so they always appears to fail - can't  */
+	/* check for errors on write. Read back value to confirm it    */
+	/* was written correctly.                                      */
+	i2c_smbus_write_byte_data(client, reg, data);
 	rc = i2c_smbus_read_byte_data(client, reg);
 
 	if (rc < 0) {

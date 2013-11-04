@@ -3105,7 +3105,7 @@ static struct platform_device msm_camera_sensor_mt9p012_km = {
 #ifdef CONFIG_MT9T013
 static struct msm_camera_sensor_flash_data flash_mt9t013 = {
 	.flash_type = MSM_CAMERA_FLASH_LED,
-	//.flash_src  = &msm_flash_src
+	.flash_src  = &msm_flash_src
 };
 
 static struct msm_camera_sensor_info msm_camera_sensor_mt9t013_data = {
@@ -4276,7 +4276,7 @@ static void __init qsd8x50_init(void)
 #endif
 
 #if defined(CONFIG_HUAWEI_INCIDENT_LED)
-	//init_incident_led_device();
+	init_incident_led_device();
 #endif
 
 #ifdef CONFIG_HUAWEI_MSM_VIBRATOR

@@ -1260,10 +1260,6 @@ static void t1320_work_func(struct work_struct *work)
 	u32 x = 0, y = 0;
 
 	struct t1320 *ts = container_of(work,struct t1320, work);
-
-	/*disable power reset when process point report*/
-	power_reset_enable = 0 ;
-
 	ret = i2c_transfer(ts->client->adapter, ts->data_i2c_msg, 2);
 
 	if (ret < 0) {
@@ -1521,8 +1517,6 @@ static int t1320_probe(struct i2c_client *client,
     /* end: added by liyaobing 00169718 for MMI test 20110105 */
 	printk(KERN_ERR "t1320 device %s at $%02X...\n", client->name, client->addr);
 
-        g_client = client;  
-		
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		printk(KERN_ERR "%s: need I2C_FUNC_I2C\n", __func__);
 		ret = -ENODEV;
@@ -1533,7 +1527,6 @@ static int t1320_probe(struct i2c_client *client,
 	ts = (struct t1320 *)client->dev.platform_data; 
 	INIT_WORK(&ts->work, t1320_work_func);
 	ts->client = client;
-	ts->client ->adapter->retries = 3 ;
 	i2c_set_clientdata(client, ts);
     
 	if (ts->init_platform_hw) {
@@ -1702,8 +1695,8 @@ static int t1320_probe(struct i2c_client *client,
     g_tm1771_dect_flag = 1;
     /* end: added by liyaobing 00169718 for MMI test 20110105 */
 
-		if (init_filter_sysfs() != 0)
-			goto err_input_register_device_failed;
+		/*if (init_filter_sysfs() != 0)
+			goto err_input_register_device_failed;*/
 
 #ifdef CONFIG_UPDATE_T1320_FIRMWARE  
          g_client = client;  

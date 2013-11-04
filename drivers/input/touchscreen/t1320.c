@@ -802,14 +802,30 @@ static int t1320_read_pdt(struct t1320 *ts)
 
 				egr = &query[7];
 
+#define EGR_DEBUG
+#ifdef EGR_DEBUG
+#define EGR_INFO printk
+#else
+#define EGR_INFO
+#endif
+				EGR_INFO("EGR features:\n");
 				ts->hasEgrPinch = egr[EGR_PINCH_REG] & EGR_PINCH;
+				EGR_INFO("\tpinch: %u\n", ts->hasEgrPinch);
 				ts->hasEgrPress = egr[EGR_PRESS_REG] & EGR_PRESS;
+				EGR_INFO("\tpress: %u\n", ts->hasEgrPress);
 				ts->hasEgrFlick = egr[EGR_FLICK_REG] & EGR_FLICK;
+				EGR_INFO("\tflick: %u\n", ts->hasEgrFlick);
 				ts->hasEgrEarlyTap = egr[EGR_EARLY_TAP_REG] & EGR_EARLY_TAP;
+				EGR_INFO("\tearly tap: %u\n", ts->hasEgrEarlyTap);
 				ts->hasEgrDoubleTap = egr[EGR_DOUBLE_TAP_REG] & EGR_DOUBLE_TAP;
+				EGR_INFO("\tdouble tap: %u\n", ts->hasEgrDoubleTap);
 				ts->hasEgrTapAndHold = egr[EGR_TAP_AND_HOLD_REG] & EGR_TAP_AND_HOLD;
+				EGR_INFO("\ttap and hold: %u\n", ts->hasEgrTapAndHold);
 				ts->hasEgrSingleTap = egr[EGR_SINGLE_TAP_REG] & EGR_SINGLE_TAP;
+				EGR_INFO("\tsingle tap: %u\n", ts->hasEgrSingleTap);
 				ts->hasEgrPalmDetect = egr[EGR_PALM_DETECT_REG] & EGR_PALM_DETECT;
+				EGR_INFO("\tpalm detect: %u\n", ts->hasEgrPalmDetect);
+
 
 				query_i2c_msg[0].buf = &fd.controlBase;
 				ret = i2c_transfer(ts->client->adapter, query_i2c_msg, 2);
@@ -821,6 +837,7 @@ static int t1320_read_pdt(struct t1320 *ts)
 				ts->f11_max_x = ((query[7] & 0x0f) * 0x100) | query[6];
 				ts->f11_max_y = ((query[9] & 0x0f) * 0x100) | query[8];
 
+				printk("max X: %d; max Y: %d\n", ts->f11_max_x, ts->f11_max_y);
 
 				ts->f11.data_length = data_length =
 					/* finger status, four fingers per register */
@@ -1556,6 +1573,10 @@ static int t1320_probe(struct i2c_client *client,
 //	set_bit(EV_SYN, ts->input_dev->evbit);
 	set_bit(EV_KEY, ts->input_dev->evbit);
 
+	set_bit(ABS_X, ts->input_dev->absbit);
+    set_bit(ABS_Y, ts->input_dev->absbit);
+    set_bit(ABS_PRESSURE, ts->input_dev->absbit);
+
    	set_bit(KEY_HOME, ts->input_dev->keybit);
 	set_bit(KEY_MENU, ts->input_dev->keybit);
    	set_bit(KEY_BACK, ts->input_dev->keybit);
@@ -1571,6 +1592,7 @@ static int t1320_probe(struct i2c_client *client,
 			/* end: added by z00168965 for multi-touch */
             input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 0xF, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MINOR, 0, 0xF, 0, 0);
+			input_set_abs_params(ts->input_dev, ABS_MT_ORIENTATION, 0, 1, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_MT_WIDTH_MAJOR, 0, 0xFF, 0, 0);
 #endif
 #ifdef CONFIG_SYNA_MULTIFINGER			
@@ -1631,6 +1653,7 @@ static int t1320_probe(struct i2c_client *client,
 	}
 
 	if (!ts->use_irq) {
+		printk(KERN_ERR "t1320  device %s in polling mode\n", client->name);
 		hrtimer_init(&ts->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		ts->timer.function = t1320_timer_func;
 		hrtimer_start(&ts->timer, ktime_set(1, 0), HRTIMER_MODE_REL);

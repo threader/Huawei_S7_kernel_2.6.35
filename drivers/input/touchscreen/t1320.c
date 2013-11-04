@@ -44,16 +44,6 @@
 #define BTN_F30 BTN_0
 #define SCROLL_ORIENTATION REL_Y
 
-/*maxium power up reset times*/
-#define MAX_POWERRESET_NUM 10 
-/*enable power up reset*/
-static int power_reset_enable = 1 ;
-/*current power up reset times*/
-static int power_reset_cnt = 0 ;
-static struct workqueue_struct *t1320_wq_reset;
-extern int msm_gpiomux_put(unsigned gpio);
-extern int msm_gpiomux_get(unsigned gpio);
-static int is_upgrade_firmware = 0 ;
 static struct workqueue_struct *t1320_wq;
 
 /* Register: EGR_0 */
@@ -89,6 +79,7 @@ struct t1320_function_descriptor {
 	__u8 dataBase;
 	__u8 intSrc;
     
+#define FUNCTION_VERSION(x) ((x >> 5) & 3)
 #define INTERRUPT_SOURCE_COUNT(x) (x & 7)
 
 	__u8 functionNumber;
@@ -97,8 +88,7 @@ struct t1320_function_descriptor {
 #define FD_ADDR_MIN 0x05
 #define FD_BYTE_COUNT 6
 
-
-/* begin: added by huangzhikui for scaling axis 2010/12/25 */
+#define MIN_ACTIVE_SPEED 5
 
 #define TOUCH_LCD_X_MAX	3128
 #define TOUCH_LCD_Y_MAX	1758
@@ -129,7 +119,7 @@ static unsigned char g_tm1771_dect_flag = 0;
 /* end: added by liyaobing 00169718 for MMI test 20110105 */
 
 /* begin: added by liyaobing 2011/1/6 */
-//static unsigned char finger_num=0;
+static unsigned char finger_num=0;
 /* end: added by liyaobing 2011/1/6 */
 
 /* define in platform/board file(s) */
@@ -1008,250 +998,6 @@ static void t1320_report_buttons(struct input_dev *dev,
 	}
 }
 
-/**
- * Minimum sample count that should be collected before filtering begin.
- */
-#define MIN_SAMPLE   5
-
-/**
- * Maximum sample count that should be kept in history.
- */
-#define SAMPLE_SIZE 10
-
-#if SAMPLE_SIZE > MAX_SAMPLE
-#error "SAMPLE_SIZE > MAX_SAMPLE"
-#endif
-
-#if MIN_SAMPLE > MAX_SAMPLE
-#error "MIN_SAMPLE > MAX_SAMPLE"
-#endif
-
-/**
- * MediaPad screen is 1280x800 pixels, and the touchscreen controller
- * is 3015x1892. So you get 2.365 touchscreen unit for each screen pixel.
- */
-
-/**
- * Sampled touches outside FILTER_RADIUS won't be used for filtering,
- * and will be discarded.
- */
-#define FILTER_RADIUS 95 /* 40 pixels * 2.365 */
-
-/**
- * How far should a touch move before it will be considered as a swipe.
- */
-#define TOUCH_THRES   10 /* 4 pixels * 2.365 */
-
-/**
- * Minimum distance between swipe.
- */
-#define SWIPE_THRES    3 /* 1 pixel * 2.365 */
-
-struct my_attribute {
-	struct kobj_attribute attr;
-	int *value;
-	int (*validator)(int);
-};
-
-static ssize_t my_attribute_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf);
-static ssize_t my_attribute_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count);
-
-#define DECL_ATTR(_name, _default, _validator) \
-	static int _name = _default; \
-	static struct my_attribute _name##_attr = { \
-		.attr.attr.name = __stringify(_name), \
-		.attr.attr.mode = 0666, \
-		.attr.show	= my_attribute_show, \
-		.attr.store = my_attribute_store, \
-		.value = &_name, \
-		.validator = _validator, \
-	}
-
-static int is_positive(int val)
-{
-	return val >= 0;
-}
-
-static int is_valid_sample(int val)
-{
-	return val > 0 && val <= MAX_SAMPLE;
-}
-
-DECL_ATTR(filter_radius, FILTER_RADIUS, is_positive);
-DECL_ATTR(touch_thres,   TOUCH_THRES,   is_positive);
-DECL_ATTR(swipe_thres,   SWIPE_THRES,   is_positive);
-DECL_ATTR(sample_size,   SAMPLE_SIZE,   is_valid_sample);
-DECL_ATTR(min_sample,    MIN_SAMPLE,    is_valid_sample);
-
-static inline void reset_finger(struct f11_finger_data *finger)
-{
-	finger->sample_index = 0;
-	finger->sample_count = 0;
-	finger->report_count = 0;
-	finger->x_sum = 0;
-	finger->y_sum = 0;
-	finger->z_sum = 0;
-}
-
-static ssize_t my_attribute_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	struct my_attribute *my = container_of(attr, struct my_attribute, attr);
-	return sprintf(buf, "%d\n", *my->value);
-}
-
-static ssize_t my_attribute_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	struct my_attribute *my = container_of(attr, struct my_attribute, attr);
-	struct t1320 *ts = (struct t1320 *) g_client->dev.platform_data;
-	int tmp, f;
-	if (sscanf(buf, "%d", &tmp) != 1 || !my->validator(tmp))
-		return -EINVAL;
-	*my->value = tmp;
-
-	if (min_sample > sample_size)
-		min_sample = sample_size;
-
-	for (f = 0; f < ts->f11.points_supported; ++f) {
-		struct f11_finger_data *finger = &ts->f11_fingers[f];
-		reset_finger(finger);
-	}
-
-	return strnlen(buf, count);
-}
-
-static int init_filter_sysfs(void)
-{
-	int i;
-	struct kobject *kobj;
-	struct my_attribute *attrs[] = {
-		&filter_radius_attr,
-		&touch_thres_attr,
-		&swipe_thres_attr,
-		&sample_size_attr,
-		&min_sample_attr,
-		0
-	};
- 
-	kobj = kobject_create_and_add("t1320", NULL);
-	if (kobj == NULL) {
-		printk(KERN_ERR "kobject_create_and_add() error");
-		return -1;
-	}
-	for (i = 0; attrs[i]; i++) {
-		if (sysfs_create_file(kobj, &attrs[i]->attr.attr)) {
-			kobject_put(kobj);
-			printk("sysfs_create_file() error");
-			return -1;
-		}
-	}
-	return 0;
-}
-
-static void add_sample(struct f11_finger_data *finger, int status, int x, int y, int z, int wx, int wy)
-{
-	if (z == 0)
-		status = 0;
-
-	if (!finger->status && status)
-		reset_finger(finger);
-	if (finger->status != status)
-		finger->dirty = 1;
-
-	finger->status = status;
-	if (status) {
-		int i, dx, dy, dist;
-		// Remove samples outside filter radius
-		while (finger->sample_count > 0) {
-			i = finger->sample_index - finger->sample_count;
-			if (i < 0)
-				i += sample_size;
-
-			dx = x - finger->x[i];
-			dy = y - finger->y[i];
-			dist = dx * dx + dy * dy;
-			if (dist <= filter_radius * filter_radius)
-				break;
-
-			finger->x_sum -= finger->x[i];
-			finger->y_sum -= finger->y[i];
-			finger->z_sum -= finger->z[i];
-			finger->sample_count--;
-			finger->dirty = 1;
-		}
-
-		i = finger->sample_index;
-		finger->sample_index = i + 1 < sample_size ? i + 1 : 0;
-		if (finger->sample_count < sample_size) {
-			finger->sample_count++;
-		} else {
-			finger->x_sum -= finger->x[i];
-			finger->y_sum -= finger->y[i];
-			finger->z_sum -= finger->z[i];
-		}
-
-		finger->x[i] = x;
-		finger->y[i] = y;
-		finger->z[i] = z;
-
-		finger->x_sum += x;
-		finger->y_sum += y;
-		finger->z_sum += z;
-
-		i = finger->sample_count;
-		finger->x_avg = finger->x_sum / i;
-		finger->y_avg = finger->y_sum / i;
-		finger->z_avg = finger->z_sum / i;
-
-		if (finger->sample_count >= min_sample) {
-			dx = finger->x_avg - finger->x_last;
-			dy = finger->y_avg - finger->y_last;
-			dist = dx * dx + dy * dy;
-			if (finger->report_count == 1) {
-				if (dist >= touch_thres * touch_thres)
-					finger->dirty = 1;
-			} else {
-				if (dist >= swipe_thres * swipe_thres)
-					finger->dirty = 1;
-			}
-		}
-	}
-}
-
-static void report_finger(struct t1320 *ts, struct f11_finger_data *finger)
-{
-	finger->dirty = 0;
-	if (finger->status) {
-#ifdef CONFIG_SYNA_MT
-		input_report_abs(ts->input_dev, ABS_MT_POSITION_X, finger->x_avg);
-		input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, finger->y_avg);
-		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, VALUE_ABS_MT_TOUCH_MAJOR);
-		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR, VALUE_ABS_MT_TOUCH_MINOR);
-		input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, finger->z_avg / 2);
-#endif
-
-#ifdef CONFIG_SYNA_MULTIFINGER
-		/* Report multiple fingers for software prior to 2.6.31 - not standard - uses special input.h */
-		input_report_abs(ts->input_dev, ABS_X_FINGER(f), finger->x_avg);
-		input_report_abs(ts->input_dev, ABS_Y_FINGER(f), finger->y_avg);
-		input_report_abs(ts->input_dev, ABS_Z_FINGER(f), finger->z_avg);
-#endif
-
-		finger->x_last = finger->x_avg;
-		finger->y_last = finger->y_avg;
-		finger->z_last = finger->z_avg;
-
-		finger->report_count++;
-	}
-
-#ifdef CONFIG_SYNA_MT
-	input_mt_sync(ts->input_dev);
-#endif
-}
-
 static void t1320_work_func(struct work_struct *work)
 {
 	int ret;
@@ -1268,19 +1014,33 @@ static void t1320_work_func(struct work_struct *work)
 		__u8 *interrupt = &ts->data[ts->f01.data_offset + 1];
 		if (ts->hasF11 && interrupt[ts->f11.interrupt_offset] & ts->f11.interrupt_mask) {
 			__u8 *f11_data = &ts->data[ts->f11.data_offset];
-			int f, dirty = 0;
+			int f;
 			__u8 finger_status_reg = 0;
 			__u8 fsr_len = (ts->f11.points_supported + 3) / 4;
-			__u8 finger_status;
+			__u8 finger_status;            
 
+            /* bengin: modify by liyaobing 2011/1/6 */
+            finger_num = 0;
 			for (f = 0; f < ts->f11.points_supported; ++f) {			
-				struct f11_finger_data *finger = &ts->f11_fingers[f];
-				__u8 reg = fsr_len + 5 * f;
-				__u8 *finger_reg = &f11_data[reg];
-				
-				if (!(f & 3))
-					finger_status_reg = f11_data[f >> 2];
-				finger_status = (finger_status_reg >> ((f & 3) << 1)) & 3;
+				if (!(f % 4))
+					finger_status_reg = f11_data[f / 4];
+				finger_status = (finger_status_reg >> ((f % 4) * 2)) & 3;
+                finger_num += (finger_status == 1 || finger_status == 2) ? 1:0 ;
+            }            
+            
+            if(finger_num == 0){
+                ts_update_pen_state(ts, 0, 0, 0, 0, 0);                
+            }else{           
+				for (f = 0; f < ts->f11.points_supported; ++f) {
+
+					if (!(f % 4))
+						finger_status_reg = f11_data[f / 4];
+
+					finger_status = (finger_status_reg >> ((f % 4) * 2)) & 3;
+	               
+					if (finger_status == 1 || finger_status == 2) {
+						__u8 reg = fsr_len + 5 * f;
+						__u8 *finger_reg = &f11_data[reg];
 
 						x = (finger_reg[0] * 0x10) | (finger_reg[2] % 0x10);
 						y = (finger_reg[1] * 0x10) | (finger_reg[2] / 0x10);
@@ -1308,56 +1068,54 @@ static void t1320_work_func(struct work_struct *work)
 	                        ts_update_pen_state(ts, x, y, z, wx, wy);
 							touch_state |= TOUCH_PEN;
 
+#ifdef CONFIG_SYNA_MULTIFINGER
+							/* Report multiple fingers for software prior to 2.6.31 - not standard - uses special input.h */
+							input_report_abs(ts->input_dev, ABS_X_FINGER(f), x);
+							input_report_abs(ts->input_dev, ABS_Y_FINGER(f), y);
+							input_report_abs(ts->input_dev, ABS_Z_FINGER(f), z);
+#endif
+
 							ts->f11_fingers[f].status = finger_status;
 						}
-				add_sample(finger, finger_status, x, y, z, wx, wy);
-				if (finger->dirty)
-					dirty = 1;
-			}
-
-			if (dirty) {
-				for (f = 0; f < ts->f11.points_supported; ++f) {
-					struct f11_finger_data *finger = &ts->f11_fingers[f];
-					report_finger(ts, finger);
+	            	}
+	            }
+            }
+                
+				/* f == ts->f11.points_supported */
+				/* set f to offset after all absolute data */
+				f = (f + 3) / 4 + f * 5;
+				if (ts->f11_has_relative) {
+					/* NOTE: not reporting relative data, even if available */
+					/* just skipping over relative data registers */
+					f += 2;
 				}
-			}
 
-
-			/* f == ts->f11.points_supported */
-			/* set f to offset after all absolute data */
-			f = (f + 3) / 4 + f * 5;
-			if (ts->f11_has_relative) {
-				/* NOTE: not reporting relative data, even if available */
-				/* just skipping over relative data registers */
-				f += 2;
-			}
-
-			if (ts->hasEgrPalmDetect) {
-				input_report_key(ts->input_dev,
-						BTN_DEAD,
-						f11_data[f + EGR_PALM_DETECT_REG] & EGR_PALM_DETECT);
-			}
-
-			if (ts->hasEgrFlick) {
-				if (f11_data[f + EGR_FLICK_REG] & EGR_FLICK) {
-					input_report_rel(ts->input_dev, REL_X, f11_data[f + 2]);
-					input_report_rel(ts->input_dev, REL_Y, f11_data[f + 3]);
+	            if (ts->hasEgrPalmDetect) {
+	                         	input_report_key(ts->input_dev,
+					                 BTN_DEAD,
+					                 f11_data[f + EGR_PALM_DETECT_REG] & EGR_PALM_DETECT);
 				}
-			}
 
-			if (ts->hasEgrSingleTap) {
-				input_report_key(ts->input_dev,
-						BTN_TOUCH,
-						f11_data[f + EGR_SINGLE_TAP_REG] & EGR_SINGLE_TAP);
-			}
+	            if (ts->hasEgrFlick) {
+	                         	if (f11_data[f + EGR_FLICK_REG] & EGR_FLICK) {
+						input_report_rel(ts->input_dev, REL_X, f11_data[f + 2]);
+						input_report_rel(ts->input_dev, REL_Y, f11_data[f + 3]);
+					}
+				}
 
-			if (ts->hasEgrDoubleTap) {
-				input_report_key(ts->input_dev,
-						BTN_TOOL_DOUBLETAP,
-						f11_data[f + EGR_DOUBLE_TAP_REG] & EGR_DOUBLE_TAP);
-			}
-		}            
+	            if (ts->hasEgrSingleTap) {
+					input_report_key(ts->input_dev,
+					                 BTN_TOUCH,
+					                 f11_data[f + EGR_SINGLE_TAP_REG] & EGR_SINGLE_TAP);
+				}
 
+	            if (ts->hasEgrDoubleTap) {
+					input_report_key(ts->input_dev,
+					                 BTN_TOOL_DOUBLETAP,
+					                 f11_data[f + EGR_DOUBLE_TAP_REG] & EGR_DOUBLE_TAP);
+				}
+			}            
+            
 		if (ts->hasF19 && interrupt[ts->f19.interrupt_offset] & ts->f19.interrupt_mask) {
 			int reg;
 			int touch = 0;
@@ -1435,9 +1193,9 @@ static void t1320_disable(struct t1320 *ts)
 		disable_irq_nosync(ts->client->irq);
 	else
 		hrtimer_cancel(&ts->timer);
-	
-	cancel_work_sync(&ts->work_reset);
-	  cancel_work_sync(&ts->work);
+
+	cancel_work_sync(&ts->work);
+
 	ts->enable = 0;
 }
 
@@ -1578,7 +1336,20 @@ static int t1320_probe(struct i2c_client *client,
 	ts->y_max = TOUCH_LCD_Y_MAX;
 	if (ts->hasF11) {
 		for (i = 0; i < ts->f11.points_supported; ++i) {
+#ifdef CONFIG_SYNA_MOUSE
+			/* old standard touchscreen for single-finger software */
+			input_set_abs_params(ts->input_dev, ABS_X, 0, ts->x_max, 0, 0);
+			input_set_abs_params(ts->input_dev, ABS_Y, 0, ts->y_max, 0, 0);
+			input_set_abs_params(ts->input_dev, ABS_PRESSURE, 0, 0xFF, 0, 0);
+			input_set_abs_params(ts->input_dev, ABS_TOOL_WIDTH, 0, 0xF, 0, 0);
+			set_bit(BTN_TOUCH, ts->input_dev->keybit);
+#endif
+
 #ifdef CONFIG_SYNA_MT
+			/* Linux 2.6.31 multi-touch */
+			input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID, 1,
+								 ts->f11.points_supported, 0, 0);
+
 			/* begin: added by z00168965 for multi-touch */
 			input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0, ts->x_max, 0, 0);
 			input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0, ts->y_max, 0, 0);
@@ -1705,10 +1476,6 @@ static int t1320_probe(struct i2c_client *client,
 	return 0;
 
 err_input_register_device_failed:
-	if (!ts->use_irq) {
-		hrtimer_cancel(&ts->timer);
-	}
-	hrtimer_cancel(&ts->timer_reset);
 	input_free_device(ts->input_dev);
 
 err_alloc_dev_failed:
@@ -1730,8 +1497,6 @@ struct t1320 *ts = i2c_get_clientdata(client);
 		free_irq(client->irq, ts);
 	else
 		hrtimer_cancel(&ts->timer);
-
-	hrtimer_cancel(&ts->timer_reset);
 
 	input_unregister_device(ts->input_dev);
    
@@ -1815,11 +1580,7 @@ static int __devinit t1320_init(void)
 		printk(KERN_ERR "Could not create work queue t1320_wq: no memory");
 		return -ENOMEM;
 	}
-	t1320_wq_reset = create_singlethread_workqueue("t1320_wq_reset");
-	if (!t1320_wq_reset) {
-		printk(KERN_ERR "Could not create work queue t1320_wq_reset: no memory");
-		return -ENOMEM;
-	}
+
 	return i2c_add_driver(&t1320_driver);
 }
 
@@ -1829,8 +1590,6 @@ static void __exit t1320_exit(void)
 
 	if (t1320_wq)
 		destroy_workqueue(t1320_wq);
-	if (t1320_wq_reset)
-		destroy_workqueue(t1320_wq_reset);
 }
 
 module_init(t1320_init);

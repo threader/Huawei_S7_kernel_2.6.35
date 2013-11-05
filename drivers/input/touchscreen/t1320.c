@@ -33,12 +33,13 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/earlysuspend.h>
+#include <linux/slab.h>
 #ifdef CONFIG_UPDATE_T1320_FIRMWARE 
 #include <linux/uaccess.h> 
 #include <linux/vmalloc.h>
 #include <mach/msm_rpcrouter.h>
 #endif
-#include <linux/slab.h>
+
 
 #define BTN_F19 BTN_0
 #define BTN_F30 BTN_0

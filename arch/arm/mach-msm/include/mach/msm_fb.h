@@ -46,6 +46,14 @@ enum {
 	MSM_MDP_NUM_INTERFACES = MSM_LCDC_INTERFACE + 1,
 };
 
+struct msm_v4l2_pd  {
+   uint32_t screen_width;
+   uint32_t screen_height;
+   uint32_t max_internal_bufs;
+   uint32_t scaling_factor;
+};
+
+
 #define MSMFB_CAP_PARTIAL_UPDATES	(1 << 0)
 
 struct msm_panel_data {
@@ -187,6 +195,9 @@ struct msm_mddi_bridge_platform_data {
 	uint32_t panel_caps;
 };
 
-
+//For v4l2
+struct mdp_blit_int_req;
+int msm_fb_v4l2_enable(bool enable, int layer);
+int msm_fb_v4l2_update(struct mdp_blit_int_req *req, int layer);
 
 #endif

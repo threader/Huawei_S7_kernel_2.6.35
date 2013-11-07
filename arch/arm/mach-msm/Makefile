@@ -129,6 +129,7 @@ obj-$(CONFIG_MACH_TROUT) += board-trout-mmc.o board-trout-wifi.o
 obj-$(CONFIG_ARCH_QSD8X50) += devices-qsd8x50.o
 #obj-$(CONFIG_MACH_QSD8X50_SURF) += board-qsd8x50.o
 obj-$(CONFIG_MACH_QSD8X50_SURF_ORG) += board-qsd8x50.o
+obj-$(CONFIG_MACH_QSD8X50_SURF_S7_S7SAFE) += board-qsd8x50-us.o
 obj-$(CONFIG_MACH_QSD8X50_SURF_S7_S710x) += board-qsd8x50-s7-10x.o
 obj-$(CONFIG_MACH_QSD8X50_SURF_S7_S720x) += board-qsd8x50-s7-20x.o
 obj-$(CONFIG_MACH_QSD8X50_FFA) += board-qsd8x50.o

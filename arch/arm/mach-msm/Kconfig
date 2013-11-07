@@ -328,11 +328,17 @@ config MACH_QSD8X50_SURF_S7_S7
 	help
 	  Support for HUAWEI S7-101 board. 
 
+config MACH_QSD8X50_SURF_S7_S7SAFE
+	bool "HUAWEI S7-SAFE Board"
+	depends on MACH_QSD8X50_SURF_S7_S7
+	help
+	Huawei s7 safe/micro config. Suitable for debugging and Kexecboot
+
 config MACH_QSD8X50_SURF_S7_S710x
 	bool "HUAWEI S7-10x Board"
 	depends on MACH_QSD8X50_SURF_S7_S7
 	help
-	Support for HUAWEI S7-201 board.
+	Support for HUAWEI S7-101 board.
 
 config MACH_QSD8X50_SURF_S7_S720x
 	bool "HUAWEI S7-20x Board"

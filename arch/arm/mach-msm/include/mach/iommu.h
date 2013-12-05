@@ -31,6 +31,7 @@
 #define MSM_IOMMU_ATTR_CACHED_WB_WA	0x1
 #define MSM_IOMMU_ATTR_CACHED_WB_NWA	0x2
 #define MSM_IOMMU_ATTR_CACHED_WT	0x3
+#define MSM_IOMMU_DOMAIN_PT_CACHEABLE	0x1
 
 /* Mask for the cache policy attribute */
 #define MSM_IOMMU_CP_MASK		0x03
@@ -104,6 +105,14 @@ struct msm_iommu_ctx_drvdata {
 	struct platform_device *pdev;
 	struct list_head attached_elm;
 };
+
+/*
+ * Interrupt handler for the IOMMU context fault interrupt. Hooking the
+ * interrupt is not supported in the API yet, but this will print an error
+ * message and dump useful IOMMU registers.
+ */
+irqreturn_t msm_iommu_fault_handler(int irq, void *dev_id);
+irqreturn_t msm_iommu_fault_handler_v2(int irq, void *dev_id);
 
 #ifdef CONFIG_MSM_IOMMU
 /*
